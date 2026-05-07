@@ -65,6 +65,9 @@ void ADC_FOC_Start(void);
 /* 启动前校准零点（电机静止状态下采样N次取平均） */
 void ADC_CalibrateOffsets(uint16_t n_samples);
 
+/* FOC开环测试使能标志（0=禁用，1=使能；在ADC注入回调中调用FocOpenTest） */
+extern volatile uint8_t g_foc_openloop_enable;
+
 /* 规则通道实时数据（VDC/温度，TIM6触发，1kHz采样） */
 extern volatile uint32_t g_vdc_raw;         /* VDC平均值（2次采样） */
 extern volatile uint32_t g_temp_motor_raw;  /* 电机温度原始值 */

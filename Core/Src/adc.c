@@ -22,6 +22,15 @@
 
 /* USER CODE BEGIN 0 */
 #include "tim.h"
+#include "foc_api.h"
+
+/* FOC开环测试使能标志 */
+volatile uint8_t g_foc_openloop_enable = 0;
+
+extern ControllerStruct controller_eyou;
+extern uint8_t open_loop_mode;
+extern int16_t v_d_test;
+extern int16_t v_q_test;
 
 /* 规则通道DMA缓冲区（双ADC同步模式，VDC采2次求平均） */
 static uint32_t adc_reg_buffer[2];  /* [0]=VDC+TEMP_MOTOR, [1]=VDC+TEMP_MOS */
@@ -535,7 +544,11 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
         g_foc_current.tim1_done_cnt = TIM1_GetLinearCnt();
         g_foc_current.sample_count++;
 
-        /* TODO: 这里可以直接做Clarke变换 + FOC计算 */
+        /* FOC开环测试（校准完成后使能）- 传原始ADC值，内部用FlashData.Ia_offset减去偏置 */
+        if (g_foc_openloop_enable) {
+            FocOpenTest(&controller_eyou, open_loop_mode, v_d_test, v_q_test,
+                        (uint16_t)raw_a, (uint16_t)raw_b);
+        }
     }
 }
 

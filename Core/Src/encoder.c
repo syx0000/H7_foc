@@ -407,3 +407,17 @@ void DPT_GetAndResetStats(uint32_t *trigger_count,
     g_max_elapsed_us  = 0;
     __enable_irq();
 }
+
+
+/* Stubs for FOC-layer integration (TODO: wire up when foc/ is re-introduced) */
+void Encoder_data_Calculate(void* controller, uint16_t hz) {
+    (void)controller; (void)hz;
+}
+
+void Encoder_out_data_Calculate(void* controller, uint16_t hz) {
+    (void)controller; (void)hz;
+}
+
+void Encoder_out_data_Reset(int32_t MaxPositionLimit, int32_t MinPositionLimit) {
+    (void)MaxPositionLimit; (void)MinPositionLimit;
+}

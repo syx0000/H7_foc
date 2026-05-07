@@ -55,6 +55,9 @@ uint32_t DWT_GetCycles(void);
 uint32_t DWT_GetMicros(void);  // 获取从初始化后经过的微秒数
 uint32_t DWT_CyclesToUs(uint32_t cycles);  // 周期数转微秒
 
+/* TIM1 PWM启动：使能输出、中断、计数器，启动CH4输出比较 */
+void TIM1_PWM_Start(void);
+
 /* TIM1时间戳（线性化：上升=CNT，下降=23999-CNT，一个完整周期0~23999 counts≈100us） */
 extern volatile uint32_t g_tim1_cc4_cnt;         /* CC4中断进入时 */
 extern volatile uint32_t g_tim1_cc4_exit_cnt;    /* CC4中断退出时 */

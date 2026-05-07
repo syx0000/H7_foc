@@ -29,6 +29,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "encoder.h"
+#include "foc_api.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,7 +50,10 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+extern ControllerStruct controller_eyou;
+uint8_t open_loop_mode = 0;  // 0=自动旋转, 1=编码器跟随
+int16_t v_d_test = 0;        // d轴电压（Q10格式）
+int16_t v_q_test = 1024;      // q轴电压（Q10格式，约0.5V）
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -117,18 +121,9 @@ int main(void)
 	printf("LT H7 foc start\r\n");
 	HAL_GPIO_WritePin(EN_GATE_GPIO_Port,EN_GATE_Pin,GPIO_PIN_SET);
 	HAL_Delay(500);
-	TIM1->BDTR |= 0xC000;//Enable main output and Automatic output enable(AOE)
-	TIM1->DIER |= TIM_DIER_UIE;           // enable update interrupt
-	TIM1->DIER |= TIM_DIER_CC4IE;         // enable CC4 interrupt for encoder pre-trigger
-	TIM1->CR1  |= TIM_CR1_UDIS;						//????????
-	TIM1->CR1  |= 0x0001;//Enable Counter
-	TIM1->CR1 &= ~TIM_CR1_CEN;  // ?????
-	
-	TIM1->CNT = 0;              // ?????
-	TIM1->CR1 &= ~TIM_CR1_UDIS; // ?? UDIS,??????
-	TIM1->CR1 |= TIM_CR1_CEN;   // ???????
-	// ?? TIM1 CH4 ????????(TIMING ??? CC4IF ?????,????????)
-	HAL_TIM_OC_Start(&htim1, TIM_CHANNEL_4);
+
+	/* 启动TIM1 PWM输出、中断和CH4编码器预触发 */
+	TIM1_PWM_Start();
 
 	/* 启动ADC注入采样链路（TIM1 TRGO→ADC1/ADC2同步） */
 	ADC_FOC_Start();
@@ -143,19 +138,42 @@ int main(void)
 	ADC_CalibrateOffsets(1024);
 	printf("ADC calibration done: Off_a=%ld Off_b=%ld\r\n",
 	       (int32_t)g_adc_offset_a, (int32_t)g_adc_offset_b);
+
+	/* FOC控制器初始化 */
+	printf("Initializing FOC controller...\r\n");
+	Init_foc(&controller_eyou);
+
+	/* 将ADC校准的零点偏置同步到FOC控制器 */
+	controller_eyou.FlashData.Ia_offset = (uint16_t)g_adc_offset_a;
+	controller_eyou.FlashData.Ib_offset = (uint16_t)g_adc_offset_b;
+	printf("FOC initialization done\r\n");
+
+	/* 使能PWM输出并启动开环测试 */
+	htim1.Instance->CCER |= 0x0555;  // Enable channel output
+	g_foc_openloop_enable = 1;       // 使能ADC回调中的FocOpenTest
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-	htim1.Instance->CCER |= 0x0555;//Enable channel output
-	__HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_3, 6000);
-	__HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_2, 6000);
-	__HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_1, 6000);
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+		/* 开环测试在ADC中断中调用 */
+
+		/* 每1秒打印一次状态 */
+		static uint32_t stat_tick = 0;
+		uint32_t now = HAL_GetTick();
+		if (now - stat_tick >= 1000) {
+			stat_tick = now;
+
+			printf("OpenLoop: theta=%u I_a=%d I_b=%d I_c=%d V_d=%d V_q=%d\r\n",
+			       controller_eyou.theta_elec,
+			       controller_eyou.I_a, controller_eyou.I_b, controller_eyou.I_c,
+			       v_d_test, v_q_test);
+		}
+
 //		/* 编码器由TIM1 CC4中断触发读取 */
 //		static uint32_t stat_tick = 0;
 //		uint32_t now = HAL_GetTick();
@@ -235,29 +253,29 @@ int main(void)
 //				t_done/240, (t_done%240)*10/240);
 //		}
 
-		/* ADC监控（注入10kHz + 规则1kHz） */
-		static uint32_t adc_mon_tick = 0;
-		if (HAL_GetTick() - adc_mon_tick >= 1000) {
-			adc_mon_tick = HAL_GetTick();
+//		/* ADC监控（注入10kHz + 规则1kHz） */
+//		static uint32_t adc_mon_tick = 0;
+//		if (HAL_GetTick() - adc_mon_tick >= 1000) {
+//			adc_mon_tick = HAL_GetTick();
 
-			/* 注入通道（电流） */
-			int32_t ia = g_foc_current.i_a_raw;
-			int32_t ib = g_foc_current.i_b_raw;
-			uint32_t inj_cnt = g_foc_current.sample_count;
+//			/* 注入通道（电流） */
+//			int32_t ia = g_foc_current.i_a_raw;
+//			int32_t ib = g_foc_current.i_b_raw;
+//			uint32_t inj_cnt = g_foc_current.sample_count;
 
-			/* 规则通道（VDC/温度） */
-			uint32_t vdc = g_vdc_raw;
-			uint32_t t_motor = g_temp_motor_raw;
-			uint32_t t_mos = g_temp_mos_raw;
+//			/* 规则通道（VDC/温度） */
+//			uint32_t vdc = g_vdc_raw;
+//			uint32_t t_motor = g_temp_motor_raw;
+//			uint32_t t_mos = g_temp_mos_raw;
 
-			/* 调试：检查ADC1规则通道状态 */
-			uint32_t adc1_state = hadc1.State;
-			uint32_t dma_state = hadc1.DMA_Handle->State;
-			uint32_t cb_cnt = g_reg_callback_count;
+//			/* 调试：检查ADC1规则通道状态 */
+//			uint32_t adc1_state = hadc1.State;
+//			uint32_t dma_state = hadc1.DMA_Handle->State;
+//			uint32_t cb_cnt = g_reg_callback_count;
 
-			printf("ADC_Inj(10kHz): Ia=%ld Ib=%ld Cnt=%lu | ADC_Reg(1kHz): VDC=%lu T_motor=%lu T_mos=%lu | State:ADC=0x%lX DMA=0x%lX CB=%lu\r\n",
-				ia, ib, inj_cnt, vdc, t_motor, t_mos, adc1_state, dma_state, cb_cnt);
-		}
+//			printf("ADC_Inj(10kHz): Ia=%ld Ib=%ld Cnt=%lu | ADC_Reg(1kHz): VDC=%lu T_motor=%lu T_mos=%lu | State:ADC=0x%lX DMA=0x%lX CB=%lu\r\n",
+//				ia, ib, inj_cnt, vdc, t_motor, t_mos, adc1_state, dma_state, cb_cnt);
+//		}
   }
   /* USER CODE END 3 */
 }

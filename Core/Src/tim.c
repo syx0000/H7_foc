@@ -396,5 +396,44 @@ uint32_t DWT_CyclesToUs(uint32_t cycles)
     return cycles / (SystemCoreClock / 1000000);
 }
 
+/**
+  * @brief  启动TIM1 PWM输出和中断
+  * @note   配置顺序：
+  *         1. 使能主输出和自动输出(MOE+AOE)
+  *         2. 使能更新中断和CC4中断
+  *         3. 禁止更新事件(UDIS=1)，准备复位计数器
+  *         4. 复位计数器CNT=0
+  *         5. 清除UDIS，允许更新事件
+  *         6. 启动计数器(CEN=1)
+  *         7. 启动CH4输出比较(用于编码器预触发)
+  * @retval None
+  */
+void TIM1_PWM_Start(void)
+{
+    /* 使能主输出(MOE)和自动输出使能(AOE) */
+    TIM1->BDTR |= TIM_BDTR_MOE | TIM_BDTR_AOE;
+
+    /* 使能更新中断 */
+    TIM1->DIER |= TIM_DIER_UIE;
+
+    /* 使能CC4中断(用于编码器预触发) */
+    TIM1->DIER |= TIM_DIER_CC4IE;
+
+    /* 临时禁止更新事件，准备复位计数器 */
+    TIM1->CR1 |= TIM_CR1_UDIS;
+
+    /* 复位计数器到0 */
+    TIM1->CNT = 0;
+
+    /* 清除UDIS，允许更新事件 */
+    TIM1->CR1 &= ~TIM_CR1_UDIS;
+
+    /* 启动计数器 */
+    TIM1->CR1 |= TIM_CR1_CEN;
+
+    /* 启动TIM1 CH4输出比较(TIMING模式，用于触发编码器读取) */
+    HAL_TIM_OC_Start(&htim1, TIM_CHANNEL_4);
+}
+
 /* USER CODE END 1 */
 
