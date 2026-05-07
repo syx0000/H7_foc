@@ -9,6 +9,7 @@
   */
 #include "encoder.h"
 #include "tim.h"
+#include "usart.h"
 #include <string.h>
 
 /* ---- CRC-8 lookup table (poly x^8+x^7+x^4+x^2+x+1) from datasheet -------- */
@@ -149,6 +150,14 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
         __HAL_UART_CLEAR_FEFLAG(huart);
         __HAL_UART_CLEAR_PEFLAG(huart);
         g_state = DPT_STATE_IDLE;
+    } else if (huart->Instance == USART1) {
+        /* 清错误标志并重启调试RX（启动时printf DMA与用户输入冲突易触发Overrun） */
+        HAL_UART_AbortReceive(huart);
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        __HAL_UART_CLEAR_NEFLAG(huart);
+        __HAL_UART_CLEAR_FEFLAG(huart);
+        __HAL_UART_CLEAR_PEFLAG(huart);
+        USART1_DebugRx_Start();
     }
 }
 
@@ -381,6 +390,11 @@ void DPT_GetLatestAngles(DPT_Angles *out) {
     __enable_irq();
 }
 
+/* ISR 专用：不禁中断直接读（调用方需保证不会被更高优先级的 RxCplt 打断） */
+void DPT_GetLatestAngles_ISR(DPT_Angles *out) {
+    *out = *(const DPT_Angles*)&g_latest_angles;
+}
+
 DPT_Status DPT_GetLastAsyncStatus(void) {
     return g_last_async_status;
 }
@@ -406,18 +420,4 @@ void DPT_GetAndResetStats(uint32_t *trigger_count,
     g_min_elapsed_us  = 0xFFFFFFFF;
     g_max_elapsed_us  = 0;
     __enable_irq();
-}
-
-
-/* Stubs for FOC-layer integration (TODO: wire up when foc/ is re-introduced) */
-void Encoder_data_Calculate(void* controller, uint16_t hz) {
-    (void)controller; (void)hz;
-}
-
-void Encoder_out_data_Calculate(void* controller, uint16_t hz) {
-    (void)controller; (void)hz;
-}
-
-void Encoder_out_data_Reset(int32_t MaxPositionLimit, int32_t MinPositionLimit) {
-    (void)MaxPositionLimit; (void)MinPositionLimit;
 }

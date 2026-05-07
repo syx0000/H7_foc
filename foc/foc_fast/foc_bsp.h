@@ -61,15 +61,16 @@ typedef int32_t  INT32;
 #define CURRENT_TRANS_DENOMINATOR 16
 
 //
-#define ENCODER_BIT 524288         // 19  //1048567     //20
-#define ENCODER_BIT_HALF 262144    // 19  //524288      //20
+// 编码器分辨率常量 - DPT 双磁编码器 24位
+#define ENCODER_BIT 16777216       // 24位 = 1<<24
+#define ENCODER_BIT_HALF 8388608   // 1<<23
 //
-#define ENCODER_BIT_OUT 524288         // 19
-#define ENCODER_BIT_HALF_OUT 262144    // 19
+#define ENCODER_BIT_OUT 16777216       // 24位
+#define ENCODER_BIT_HALF_OUT 8388608   // 1<<23
 
 //
-#define ENCODER_16BIT_DIV 3    // 19>>3
-#define ENCODER_10BIT_DIV 9    // 19>>9
+#define ENCODER_16BIT_DIV 8    // 24-16=8，(NPP*raw)%2^24 >> 8 → theta_elec 0~65536
+#define ENCODER_10BIT_DIV 14   // 24-10=14，raw*360 >> 14 → real_position 1°/1024
 
 /**********************************************************************************************/
 #define UDC 48    //=1699.6%24

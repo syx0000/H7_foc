@@ -660,6 +660,11 @@
               <FilePath>..\foc\foc_fast\foc_kernel.c</FilePath>
             </File>
             <File>
+              <FileName>encoder_calc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\foc\foc_fast\encoder_calc.c</FilePath>
+            </File>
+            <File>
               <FileName>foc_position_loop.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\foc\foc_fast\foc_position_loop.c</FilePath>

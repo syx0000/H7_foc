@@ -102,6 +102,9 @@ uint8_t DPT_HasNewData(void);
 /* 获取最新的编码器数据（中断安全）。 */
 void DPT_GetLatestAngles(DPT_Angles *out);
 
+/* ISR专用：不禁中断直接读（仅在同级或更低优先级中断中使用） */
+void DPT_GetLatestAngles_ISR(DPT_Angles *out);
+
 /* 查询上一次传输的状态（OK/CRC错误/超时等） */
 DPT_Status DPT_GetLastAsyncStatus(void);
 

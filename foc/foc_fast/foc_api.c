@@ -245,6 +245,9 @@ void FocOpenTest(ControllerStruct* controller,
                  int16_t v_q,
                  uint16_t IaSampleValue,
                  uint16_t IbSampleValue) {
+    static int32_t theta_openloop = 0;  /* 开环模式独立累计，避免被编码器覆盖 */
+    int32_t theta_used;
+
     // 1. 电流采样
     controller->Ia_raw = IaSampleValue;
     controller->Ib_raw = IbSampleValue;
@@ -253,18 +256,16 @@ void FocOpenTest(ControllerStruct* controller,
     // 2. 电角度生成
     if (ModelChoose == 0) {
         // 自动给定模式：固定速度旋转
-        controller->theta_elec += 40;  // 调整步进值控制转速
-        if (controller->theta_elec >= 65536) {
-            controller->theta_elec -= 65536;
-        }
+        theta_openloop += 40;  // 调整步进值控制转速
+        if (theta_openloop >= 65536) theta_openloop -= 65536;
+        theta_used = theta_openloop;
     } else {
-        // 编码器模式：从DPT编码器读取（暂时跳过，需要适配）
-        // TODO: 适配DPT编码器接口
-        controller->theta_elec += 150;
+        // 编码器模式：使用 Encoder_data_Calculate 计算出的 theta_elec
+        theta_used = controller->theta_elec;
     }
 
     // 3. 设置相电压（SVPWM）
-    set_phase_voltage(controller, v_d, v_q, controller->theta_elec);
+    set_phase_voltage(controller, v_d, v_q, theta_used);
 }
 
 float measurePhaseResistance(ControllerStruct* controller) {

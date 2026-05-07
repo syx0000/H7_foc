@@ -23,6 +23,7 @@
 /* USER CODE BEGIN 0 */
 #include "tim.h"
 #include "foc_api.h"
+#include "encoder_calc.h"
 
 /* FOC开环测试使能标志 */
 volatile uint8_t g_foc_openloop_enable = 0;
@@ -543,6 +544,10 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
         g_foc_current.i_b_raw = raw_b - g_adc_offset_b;
         g_foc_current.tim1_done_cnt = TIM1_GetLinearCnt();
         g_foc_current.sample_count++;
+
+        /* 编码器计算（10kHz，读取DPT最新异步缓冲数据） */
+        Encoder_data_Calculate(&controller_eyou, 10000);
+        Encoder_out_data_Calculate(&controller_eyou, 10000);
 
         /* FOC开环测试（校准完成后使能）- 传原始ADC值，内部用FlashData.Ia_offset减去偏置 */
         if (g_foc_openloop_enable) {
