@@ -116,8 +116,10 @@ void Encoder_data_Calculate(ControllerStruct* controller, uint16_t hz) {
   函数名: Encoder_out_data_Calculate
   描  述: 低速端编码器（输出端）相关计算：位置 + 速度
 ********************************************************************************/
+/* Encoder_out_data_Calculate 首次运行标志，Reset 后清零跳过首次初始化 */
+static uint8_t out_first_run = 1;
+
 void Encoder_out_data_Calculate(ControllerStruct* controller, uint16_t hz) {
-    static uint8_t out_first_run = 1;
     DPT_Angles dpt_angles;
     DPT_GetLatestAngles_ISR(&dpt_angles);
     uint32_t temp_raw = get_output_angle_raw(&dpt_angles);
@@ -203,4 +205,7 @@ void Encoder_out_data_Reset(int32_t MaxPositionLimit, int32_t MinPositionLimit) 
     controller_eyou.old_angle_count_out = temp;
     controller_eyou.old_angle_count_out_raw = temp_raw;
     controller_eyou.position_ref = controller_eyou.real_position_out;
+
+    /* 标记首次初始化已完成，避免 Encoder_out_data_Calculate 再覆盖 */
+    out_first_run = 0;
 }

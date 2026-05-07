@@ -31,6 +31,8 @@
 #include "encoder.h"
 #include "foc_api.h"
 #include "foc_bsp.h"
+#include "foc_controller.h"
+#include "encoder_calc.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -140,17 +142,24 @@ int main(void)
 	printf("ADC calibration done: Off_a=%ld Off_b=%ld\r\n",
 	       (int32_t)g_adc_offset_a, (int32_t)g_adc_offset_b);
 
-	/* FOC控制器初始化 */
+	/* FOC控制器初始化（参考PHU Init_func顺序） */
 	printf("Initializing FOC controller...\r\n");
+
+	/* 1. 设置电机参数（必须在Init_foc之前，PID全局变量会被controller_init引用） */
+	set_ver_par(100);  // id=100: motor_h7_0426配套，NPP=8
+
+	/* 2. FOC核心初始化（滤波器/斜坡/标志位/FlashData/ResetControlData） */
 	Init_foc(&controller_eyou);
 
-	/* 极对数（参考motor_h7_0426：pole_pairs=8） */
-	NPP = 8;
-
-	/* 将ADC校准的零点偏置同步到FOC控制器 */
+	/* 3. 将ADC校准的零点偏置同步到FOC控制器 */
 	controller_eyou.FlashData.Ia_offset = (uint16_t)g_adc_offset_a;
 	controller_eyou.FlashData.Ib_offset = (uint16_t)g_adc_offset_b;
-	printf("FOC initialization done\r\n");
+
+	/* 4. 输出端编码器零位初始化（避免real_position_out跳变保护卡0） */
+	Encoder_out_data_Reset(controller_eyou.FlashData.MaxPositionLimit,
+	                       controller_eyou.FlashData.MinPositionLimit);
+
+	printf("FOC initialization done, NPP=%d\r\n", NPP);
 
 	/* 使能PWM输出并启动开环测试 */
 	htim1.Instance->CCER |= 0x0555;  // Enable channel output
@@ -213,36 +222,36 @@ int main(void)
 //				last_us, min_us, max_us);
 //		}
 
-		/* 每1秒打印时序测试 */
-		static uint32_t ts_tick = 0;
-		if (HAL_GetTick() - ts_tick >= 1000) {
-			ts_tick = HAL_GetTick();
+//		/* 每1秒打印时序测试 */
+//		static uint32_t ts_tick = 0;
+//		if (HAL_GetTick() - ts_tick >= 1000) {
+//			ts_tick = HAL_GetTick();
 
-			/* 快照5个时间戳（TIM1 CNT单位，1us = 240 counts） */
-			uint32_t t_cc4_in   = g_tim1_cc4_cnt;
-			uint32_t t_cc4_out  = g_tim1_cc4_exit_cnt;
-			uint32_t t_enc_done = g_tim1_enc_done_cnt;
-			uint32_t t_up_in    = g_tim1_update_cnt;
-			uint32_t t_up_out   = g_tim1_update_exit_cnt;
+//			/* 快照5个时间戳（TIM1 CNT单位，1us = 240 counts） */
+//			uint32_t t_cc4_in   = g_tim1_cc4_cnt;
+//			uint32_t t_cc4_out  = g_tim1_cc4_exit_cnt;
+//			uint32_t t_enc_done = g_tim1_enc_done_cnt;
+//			uint32_t t_up_in    = g_tim1_update_cnt;
+//			uint32_t t_up_out   = g_tim1_update_exit_cnt;
 
-			uint32_t trig, succ, skip, last_us, min_us, max_us;
-			DPT_GetAndResetStats(&trig, &succ, &skip, &last_us, &min_us, &max_us);
+//			uint32_t trig, succ, skip, last_us, min_us, max_us;
+//			DPT_GetAndResetStats(&trig, &succ, &skip, &last_us, &min_us, &max_us);
 
-			DPT_Angles angles;
-			DPT_GetLatestAngles(&angles);
+//			DPT_Angles angles;
+//			DPT_GetLatestAngles(&angles);
 
-			printf("Inner:%.2f Outer:%.2f Sta:0x%02X | Trig:%luHz Succ:%lu Skip:%lu | "
-			       "T(us):last=%lu min=%lu max=%lu | "
-			       "Timing(us): CC4_in=%lu.%lu CC4_out=%lu.%lu Enc_done=%lu.%lu UP_in=%lu.%lu UP_out=%lu.%lu\r\n",
-				angles.inner_deg, angles.outer_deg, angles.status,
-				trig, succ, skip,
-				last_us, min_us, max_us,
-				t_cc4_in/240,   (t_cc4_in%240)*10/240,
-				t_cc4_out/240,  (t_cc4_out%240)*10/240,
-				t_enc_done/240, (t_enc_done%240)*10/240,
-				t_up_in/240,    (t_up_in%240)*10/240,
-				t_up_out/240,   (t_up_out%240)*10/240);
-		}
+//			printf("Inner:%.2f Outer:%.2f Sta:0x%02X | Trig:%luHz Succ:%lu Skip:%lu | "
+//			       "T(us):last=%lu min=%lu max=%lu | "
+//			       "Timing(us): CC4_in=%lu.%lu CC4_out=%lu.%lu Enc_done=%lu.%lu UP_in=%lu.%lu UP_out=%lu.%lu\r\n",
+//				angles.inner_deg, angles.outer_deg, angles.status,
+//				trig, succ, skip,
+//				last_us, min_us, max_us,
+//				t_cc4_in/240,   (t_cc4_in%240)*10/240,
+//				t_cc4_out/240,  (t_cc4_out%240)*10/240,
+//				t_enc_done/240, (t_enc_done%240)*10/240,
+//				t_up_in/240,    (t_up_in%240)*10/240,
+//				t_up_out/240,   (t_up_out%240)*10/240);
+//		}
 
 //		/* ADC注入采样检测（TIM1 TRGO=10kHz，中央对齐每个完整周期触发1次） */
 //		static uint32_t adc_tick = 0;

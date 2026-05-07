@@ -245,26 +245,21 @@ void FocOpenTest(ControllerStruct* controller,
                  int16_t v_q,
                  uint16_t IaSampleValue,
                  uint16_t IbSampleValue) {
-    static int32_t theta_openloop = 0;  /* 开环模式独立累计，避免被编码器覆盖 */
+    static int32_t theta_openloop = 0;
     int32_t theta_used;
+    (void)IaSampleValue;
+    (void)IbSampleValue;
 
-    // 1. 电流采样
-    controller->Ia_raw = IaSampleValue;
-    controller->Ib_raw = IbSampleValue;
-    phase_current_sample(controller);
-
-    // 2. 电角度生成
+    // 电角度生成
     if (ModelChoose == 0) {
-        // 自动给定模式：固定速度旋转
-        theta_openloop += 40;  // 调整步进值控制转速
+        theta_openloop += 40;
         if (theta_openloop >= 65536) theta_openloop -= 65536;
         theta_used = theta_openloop;
     } else {
-        // 编码器模式：使用 Encoder_data_Calculate 计算出的 theta_elec
         theta_used = controller->theta_elec;
     }
 
-    // 3. 设置相电压（SVPWM）
+    // 设置相电压（SVPWM）
     set_phase_voltage(controller, v_d, v_q, theta_used);
 }
 

@@ -24,6 +24,7 @@
 #include "tim.h"
 #include "foc_api.h"
 #include "encoder_calc.h"
+#include "foc_current_loop.h"
 
 /* FOC开环测试使能标志 */
 volatile uint8_t g_foc_openloop_enable = 0;
@@ -540,6 +541,10 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
         int32_t raw_a = (int32_t)HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1);
         int32_t raw_b = (int32_t)HAL_ADCEx_InjectedGetValue(&hadc2, ADC_INJECTED_RANK_1);
 
+        /* g_foc_current 是ADC驱动独立的调试/校准结构，存减偏置后的值，
+           供 ADC_CalibrateOffsets / 驱动层监控使用。
+           FOC 的电流通路不经过这里 —— FOC 用原始 raw_a/raw_b 写入 controller_eyou.Ia_raw，
+           由 phase_current_sample() 内部减 FlashData.Ia_offset（只会减一次）。 */
         g_foc_current.i_a_raw = raw_a - g_adc_offset_a;
         g_foc_current.i_b_raw = raw_b - g_adc_offset_b;
         g_foc_current.tim1_done_cnt = TIM1_GetLinearCnt();
@@ -549,7 +554,13 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
         Encoder_data_Calculate(&controller_eyou, 10000);
         Encoder_out_data_Calculate(&controller_eyou, 10000);
 
-        /* FOC开环测试（校准完成后使能）- 传原始ADC值，内部用FlashData.Ia_offset减去偏置 */
+        /* 相电流采样处理（编码器计算后，FOC运算前）
+           参考PHU/H7架构：单独一步，把raw_a/raw_b转成I_a/I_b/I_c */
+        controller_eyou.Ia_raw = (uint16_t)raw_a;
+        controller_eyou.Ib_raw = (uint16_t)raw_b;
+        phase_current_sample(&controller_eyou);
+
+        /* FOC开环测试（校准完成后使能） */
         if (g_foc_openloop_enable) {
             FocOpenTest(&controller_eyou, open_loop_mode, v_d_test, v_q_test,
                         (uint16_t)raw_a, (uint16_t)raw_b);
