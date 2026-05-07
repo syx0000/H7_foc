@@ -45,6 +45,26 @@ void MX_ADC2_Init(void);
 
 /* USER CODE BEGIN Prototypes */
 
+/* FOC电流采样数据（由TIM1 TRGO触发，10kHz采样率） */
+typedef struct {
+    int32_t  i_a_raw;      /* CUR_A 原始值（有符号，已减零点偏置） */
+    int32_t  i_b_raw;      /* CUR_B 原始值 */
+    uint32_t sample_count; /* 采样计数 */
+    uint32_t tim1_done_cnt;/* 采样完成时TIM1线性计数值 */
+} FOC_CurrentSample_t;
+
+extern volatile FOC_CurrentSample_t g_foc_current;
+
+/* ADC偏置零点（启动时自检） */
+extern volatile int32_t g_adc_offset_a;
+extern volatile int32_t g_adc_offset_b;
+
+/* 启动ADC注入触发链（调用前确保TIM1 TRGO已经配置好） */
+void ADC_FOC_Start(void);
+
+/* 启动前校准零点（电机静止状态下采样N次取平均） */
+void ADC_CalibrateOffsets(uint16_t n_samples);
+
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

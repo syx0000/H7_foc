@@ -129,6 +129,16 @@ int main(void)
 	TIM1->CR1 |= TIM_CR1_CEN;   // ???????
 	// ?? TIM1 CH4 ????????(TIMING ??? CC4IF ?????,????????)
 	HAL_TIM_OC_Start(&htim1, TIM_CHANNEL_4);
+
+	/* 启动ADC注入采样链路（TIM1 TRGO→ADC1/ADC2同步） */
+	ADC_FOC_Start();
+
+	/* 电流零点校准（电机静止，IGBT未输出时） */
+	printf("Calibrating ADC offsets...\r\n");
+	HAL_Delay(100);  // 等待ADC稳定
+	ADC_CalibrateOffsets(1024);
+	printf("ADC calibration done: Off_a=%ld Off_b=%ld\r\n",
+	       (int32_t)g_adc_offset_a, (int32_t)g_adc_offset_b);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -195,6 +205,30 @@ int main(void)
 //				t_enc_done/240, (t_enc_done%240)*10/240,
 //				t_up_in/240,    (t_up_in%240)*10/240,
 //				t_up_out/240,   (t_up_out%240)*10/240);
+//		}
+
+//		/* ADC注入采样检测（TIM1 TRGO=10kHz，中央对齐每个完整周期触发1次） */
+//		static uint32_t adc_tick = 0;
+//		static uint32_t last_sample_count = 0;
+//		if (HAL_GetTick() - adc_tick >= 1000) {
+//			uint32_t elapsed_ms = HAL_GetTick() - adc_tick;
+//			adc_tick = HAL_GetTick();
+
+//			/* 快照采样数据 */
+//			uint32_t cnt_now   = g_foc_current.sample_count;
+//			int32_t  ia        = g_foc_current.i_a_raw;
+//			int32_t  ib        = g_foc_current.i_b_raw;
+//			uint32_t t_done    = g_foc_current.tim1_done_cnt;
+//			int32_t  off_a     = g_adc_offset_a;
+//			int32_t  off_b     = g_adc_offset_b;
+
+//			uint32_t delta     = cnt_now - last_sample_count;
+//			last_sample_count  = cnt_now;
+//			uint32_t rate_hz   = (delta * 1000) / elapsed_ms;
+
+//			printf("ADC: Rate=%luHz Cnt=%lu | Ia=%ld Ib=%ld | Off_a=%ld Off_b=%ld | t_done=%lu.%luus\r\n",
+//				rate_hz, cnt_now, ia, ib, off_a, off_b,
+//				t_done/240, (t_done%240)*10/240);
 //		}
   }
   /* USER CODE END 3 */

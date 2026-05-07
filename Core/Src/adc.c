@@ -21,7 +21,11 @@
 #include "adc.h"
 
 /* USER CODE BEGIN 0 */
+#include "tim.h"
 
+volatile FOC_CurrentSample_t g_foc_current = {0};
+volatile int32_t g_adc_offset_a = 0;
+volatile int32_t g_adc_offset_b = 0;
 /* USER CODE END 0 */
 
 ADC_HandleTypeDef hadc1;
@@ -182,7 +186,7 @@ void MX_ADC2_Init(void)
   */
   sConfigInjected.InjectedChannel = ADC_CHANNEL_4;
   sConfigInjected.InjectedRank = ADC_INJECTED_RANK_1;
-  sConfigInjected.InjectedSamplingTime = ADC_SAMPLETIME_16CYCLES_5;
+  sConfigInjected.InjectedSamplingTime = ADC_SAMPLETIME_1CYCLE_5;
   sConfigInjected.InjectedSingleDiff = ADC_SINGLE_ENDED;
   sConfigInjected.InjectedOffsetNumber = ADC_OFFSET_NONE;
   sConfigInjected.InjectedOffset = 0;
@@ -280,6 +284,9 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
 
     __HAL_LINKDMA(adcHandle,DMA_Handle,hdma_adc1);
 
+    /* ADC1 interrupt Init */
+    HAL_NVIC_SetPriority(ADC_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(ADC_IRQn);
   /* USER CODE BEGIN ADC1_MspInit 1 */
 
   /* USER CODE END ADC1_MspInit 1 */
@@ -331,6 +338,9 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
 
     __HAL_LINKDMA(adcHandle,DMA_Handle,hdma_adc2);
 
+    /* ADC2 interrupt Init */
+    HAL_NVIC_SetPriority(ADC_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(ADC_IRQn);
   /* USER CODE BEGIN ADC2_MspInit 1 */
 
   /* USER CODE END ADC2_MspInit 1 */
@@ -362,6 +372,16 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 
     /* ADC1 DMA DeInit */
     HAL_DMA_DeInit(adcHandle->DMA_Handle);
+
+    /* ADC1 interrupt Deinit */
+  /* USER CODE BEGIN ADC1:ADC_IRQn disable */
+    /**
+    * Uncomment the line below to disable the "ADC_IRQn" interrupt
+    * Be aware, disabling shared interrupt may affect other IPs
+    */
+    /* HAL_NVIC_DisableIRQ(ADC_IRQn); */
+  /* USER CODE END ADC1:ADC_IRQn disable */
+
   /* USER CODE BEGIN ADC1_MspDeInit 1 */
 
   /* USER CODE END ADC1_MspDeInit 1 */
@@ -388,6 +408,16 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 
     /* ADC2 DMA DeInit */
     HAL_DMA_DeInit(adcHandle->DMA_Handle);
+
+    /* ADC2 interrupt Deinit */
+  /* USER CODE BEGIN ADC2:ADC_IRQn disable */
+    /**
+    * Uncomment the line below to disable the "ADC_IRQn" interrupt
+    * Be aware, disabling shared interrupt may affect other IPs
+    */
+    /* HAL_NVIC_DisableIRQ(ADC_IRQn); */
+  /* USER CODE END ADC2:ADC_IRQn disable */
+
   /* USER CODE BEGIN ADC2_MspDeInit 1 */
 
   /* USER CODE END ADC2_MspDeInit 1 */
@@ -395,6 +425,77 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 }
 
 /* USER CODE BEGIN 1 */
+
+/**
+  * @brief  启动ADC注入触发链（TIM1 TRGO → ADC1/ADC2 同步注入）
+  * @note   调用前请确保 TIM1 已初始化并启动，TRGO源=Update事件
+  *         双ADC regsimult+injecsimult 模式下，只需启动主机ADC1，ADC2会跟随
+  */
+void ADC_FOC_Start(void)
+{
+    /* ADC硬件校准（单端模式） */
+    HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+    HAL_ADCEx_Calibration_Start(&hadc2, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+
+    /* 注入通道：ADC2必须先启动（从机），再启动ADC1（主机） */
+    HAL_ADCEx_InjectedStart(&hadc2);
+    HAL_ADCEx_InjectedStart_IT(&hadc1);  /* 主机开中断，JEOC时触发回调 */
+}
+
+/**
+  * @brief  电流零点校准（电机必须静止，IGBT不输出）
+  * @param  n_samples 采样次数，建议1024
+  */
+void ADC_CalibrateOffsets(uint16_t n_samples)
+{
+    int64_t sum_a = 0, sum_b = 0;
+    uint32_t start = g_foc_current.sample_count;
+
+    while ((g_foc_current.sample_count - start) < n_samples) {
+        /* 等待采样完成 */
+    }
+
+    /* 读取累计的原始值前，暂时清零偏置 */
+    int32_t saved_a = g_adc_offset_a;
+    int32_t saved_b = g_adc_offset_b;
+    g_adc_offset_a = 0;
+    g_adc_offset_b = 0;
+
+    start = g_foc_current.sample_count;
+    uint32_t count = 0;
+    while (count < n_samples) {
+        if (g_foc_current.sample_count != start) {
+            sum_a += g_foc_current.i_a_raw;
+            sum_b += g_foc_current.i_b_raw;
+            start = g_foc_current.sample_count;
+            count++;
+        }
+    }
+
+    g_adc_offset_a = (int32_t)(sum_a / n_samples);
+    g_adc_offset_b = (int32_t)(sum_b / n_samples);
+    (void)saved_a; (void)saved_b;
+}
+
+/**
+  * @brief  ADC注入转换完成回调（主机ADC1 JEOC触发）
+  * @note   在ADC_IRQHandler中调用。整个ISR耗时<1us @480MHz
+  */
+void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
+{
+    if (hadc->Instance == ADC1) {
+        /* 读取同步采样的A/B相电流 */
+        int32_t raw_a = (int32_t)HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1);
+        int32_t raw_b = (int32_t)HAL_ADCEx_InjectedGetValue(&hadc2, ADC_INJECTED_RANK_1);
+
+        g_foc_current.i_a_raw = raw_a - g_adc_offset_a;
+        g_foc_current.i_b_raw = raw_b - g_adc_offset_b;
+        g_foc_current.tim1_done_cnt = TIM1_GetLinearCnt();
+        g_foc_current.sample_count++;
+
+        /* TODO: 这里可以直接做Clarke变换 + FOC计算 */
+    }
+}
 
 /* USER CODE END 1 */
 
