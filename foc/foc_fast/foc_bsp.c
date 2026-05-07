@@ -15,6 +15,7 @@
 #include "ifly_fault_api.h"
 #include "ifly_led.h"
 #include "tim.h"
+#include "flash_port.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -319,6 +320,21 @@ void dbg_log_print(void) {
                controller_eyou.real_position_out / 1024.0,
                (controller_eyou.position_ref - controller_eyou.real_position_out) / 1024.0,
                controller_eyou.FlashData.mech_offest_out);
+        break;
+    case 160:
+        /* 写Flash：把当前FlashData保存 */
+        WriteDataToFlash();
+        printf("WriteDataToFlash\r\n");
+        dbgLogFlag = 0;
+        break;
+    case 161:
+        /* 擦除Flash扇区：下次上电会触发版本不匹配重新初始化 */
+        if (Flash_EraseSector() == HAL_OK) {
+            printf("Flash erase OK\r\n");
+        } else {
+            printf("Flash erase FAIL\r\n");
+        }
+        dbgLogFlag = 0;
         break;
     default:
         break;

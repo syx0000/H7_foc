@@ -198,6 +198,11 @@ InertiaIdentErr runInertiaIdent(ControllerStruct *c,
   c->I_q_ref         = 0;
   c->foc_run         = 1;
 
+  /* 累加器（提前声明以避免 goto cleanup 跨过初始化） */
+  double sum_J          = 0.0;
+  double sum_a_drv_pos  = 0.0, sum_a_drv_neg  = 0.0;
+  double sum_Te_drv_pos = 0.0, sum_Te_drv_neg = 0.0;
+
   /* 初始稳定 */
   if (wait_ms_check(c, 50) != 0) {
     r->err_code = INERTIA_IDENT_ERR_FAULT; goto cleanup;
@@ -206,11 +211,6 @@ InertiaIdentErr runInertiaIdent(ControllerStruct *c,
   // printf("Inertia ident: coast-down, cycles=%u (warmup %u), omega [%d, %d]\r\n",
   //        (unsigned)cfg->cycles, (unsigned)cfg->warmup_cycles,
   //        (int)omega_lo, (int)cfg->speed_threshold);
-
-  /* 累加 (drive 段; coast 段 J 直接计入 sum_J) */
-  double sum_J          = 0.0;
-  double sum_a_drv_pos  = 0.0, sum_a_drv_neg  = 0.0;
-  double sum_Te_drv_pos = 0.0, sum_Te_drv_neg = 0.0;
 
   for (uint32_t k = 0; k < cfg->cycles; ++k) {
     InertiaAcc drive_pos, coast_pos, drive_neg, coast_neg;
@@ -290,7 +290,7 @@ InertiaIdentErr runInertiaIdent(ControllerStruct *c,
 
     /* per-cycle 诊断: drive/coast 加速度 + 两侧 J + 合并 J */
     {
-      const char *tag = (k < cfg->warmup_cycles) ? " (warmup)" : "";
+      //const char *tag = (k < cfg->warmup_cycles) ? " (warmup)" : "";
       //printf("  cycle %u%s: drv+/-=%.1f/%.1f cst+/-=%.1f/%.1f Te+/-=%.4f/%.4f "
       //       "J+/-=%.3e/%.3e Jk=%.3e\r\n",
       //       (unsigned)k, tag,

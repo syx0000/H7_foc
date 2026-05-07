@@ -15,7 +15,9 @@
 // #include "cia402appl.h"  /* EtherCAT removed */
 #include "func_subprogram.h"
 #include "func_pid.h"
+#include "flash_port.h"
 #include <stdio.h>
+#include <string.h>
 
 Portection_Value Threshold_buffer;
 
@@ -78,10 +80,37 @@ void ResetControlData(ControllerStruct* controller) {
 /*******************************************************************************
   函数名: InitFlashData
   描  述: 上电初始化FLASH中的运行所需数据。
-          STM32项目暂无Flash存储，改为直接用全局flash_data/set_ver_par设置的默认值
+          1) 先从Flash读取，若版本匹配则采用Flash值
+          2) 版本不匹配/首次上电，用 set_ver_par 的默认值填充并写回Flash
 ********************************************************************************/
 uint8_t InitFlashData(ControllerStruct* controller) {
-    /* 从set_ver_par设置的全局PID参数写入FlashData */
+    /* 1. 尝试从Flash读取 */
+    FlashSavedData flash_backup;
+    ReadDataFromAddress(controller, MOTORID0_RUN_DATA_ADDRESS);
+
+    if (controller->FlashData.StructVersion == FLASH_STRUCT_VERSION) {
+        printf("Flash: version OK (%u), use stored params\r\n",
+               (unsigned)controller->FlashData.StructVersion);
+        printf("FlashData: CurPID=%u/%u/%u  SpdPID=%u/%u/%u  PosPID=%u/%u/%u  FF=%u\r\n",
+               (unsigned)controller->FlashData.Current_Kp,
+               (unsigned)controller->FlashData.Current_Ki,
+               (unsigned)controller->FlashData.Current_Kd,
+               (unsigned)controller->FlashData.Speed_Kp,
+               (unsigned)controller->FlashData.Speed_Ki,
+               (unsigned)controller->FlashData.Speed_Kd,
+               (unsigned)controller->FlashData.Position_Kp,
+               (unsigned)controller->FlashData.Position_Ki,
+               (unsigned)controller->FlashData.Position_Kd,
+               (unsigned)controller->FlashData.PosErrFF_Kp);
+        return 0;
+    }
+
+    printf("Flash: version mismatch (got 0x%08X, expect %u), re-init\r\n",
+           (unsigned)controller->FlashData.StructVersion, FLASH_STRUCT_VERSION);
+
+    /* 2. 用 set_ver_par 设置的全局默认值填充 FlashData */
+    (void)flash_backup;
+    controller->FlashData.StructVersion = FLASH_STRUCT_VERSION;
     controller->FlashData.Current_Kp = INC_PID_CURRENT_KP;
     controller->FlashData.Current_Ki = INC_PID_CURRENT_KI;
     controller->FlashData.Current_Kd = INC_PID_CURRENT_KD;
@@ -92,9 +121,13 @@ uint8_t InitFlashData(ControllerStruct* controller) {
     controller->FlashData.Position_Ki = INC_PID_POSITION_KI;
     controller->FlashData.Position_Kd = INC_PID_POSITION_KD;
     controller->FlashData.PosErrFF_Kp = POSERRFF_KP;
-
     controller->FlashData.Pid_PositionLimit = INC_PID_POSITION_LIMIT;
     controller->FlashData.MaxSpeed = DEFAULT_MAX_SPEED;
+
+    /* 3. 写回Flash */
+    if (WriteRunDataToFlash(controller, MOTORID0_RUN_DATA_ADDRESS) == 0) {
+        printf("Flash: default params saved\r\n");
+    }
 
     printf("FlashData: CurPID=%u/%u/%u  SpdPID=%u/%u/%u  PosPID=%u/%u/%u  FF=%u\r\n",
            (unsigned)controller->FlashData.Current_Kp,
@@ -122,14 +155,28 @@ uint8_t DefualtPidValue(FlashSavedData* FlashData) {
 }
 
 uint8_t ReadDataFromAddress(ControllerStruct* controller, unsigned int Address) {
+    Flash_ReadData(Address, &controller->FlashData, sizeof(FlashSavedData));
     return 0;
 }
 
 uint8_t WriteRunDataToFlash(ControllerStruct* controller, unsigned int Address) {
+    /* H743整扇区擦除，所以本扇区内其他数据会一起丢 —— 参数写回时要保证此扇区只存FlashData */
+    if (Flash_EraseSector() != HAL_OK) {
+        printf("Flash erase failed\r\n");
+        return 1;
+    }
+    if (Flash_WriteData(Address, &controller->FlashData, sizeof(FlashSavedData)) != HAL_OK) {
+        printf("Flash write failed\r\n");
+        return 1;
+    }
+    printf("Flash write OK @0x%08X, %u bytes\r\n",
+           (unsigned)Address, (unsigned)sizeof(FlashSavedData));
     return 0;
 }
 
 void WriteDataToFlash(void) {
+    extern ControllerStruct controller_eyou;
+    WriteRunDataToFlash(&controller_eyou, MOTORID0_RUN_DATA_ADDRESS);
 }
 
 uint8_t WriteFaultThreshold(Portection_Value* Threshold, uint32_t Address) {

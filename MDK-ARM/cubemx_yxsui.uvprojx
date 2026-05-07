@@ -395,6 +395,11 @@
               <FilePath>../Core/Src/encoder.c</FilePath>
             </File>
             <File>
+              <FileName>flash_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/flash_port.c</FilePath>
+            </File>
+            <File>
               <FileName>main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/main.c</FilePath>

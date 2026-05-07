@@ -163,7 +163,7 @@ int main(void)
 
 	/* 使能PWM输出并启动开环测试 */
 	htim1.Instance->CCER |= 0x0555;  // Enable channel output
-	g_foc_openloop_enable = 1;       // 使能ADC回调中的FocOpenTest
+	g_foc_openloop_enable = 0;       // 使能ADC回调中的FocOpenTest
 
 	/* 启动USART1调试命令接收 */
 	USART1_DebugRx_Start();

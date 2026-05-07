@@ -8,6 +8,88 @@
 - **主频**: 480MHz (SystemCoreClock)
 - **编译器**: Keil MDK-ARM v5.21 (ARM Compiler 5.06)
 - **HAL库**: STM32H7xx HAL Driver
+- **电机**: motor_h7_0426配套，极对数NPP=8，减速比50:1
+
+## 参考工程
+
+本项目移植自以下两个参考工程：
+
+### HPMicro PHU (`C:\Users\syx19\Desktop\src_git\hpm6e00evk_ifly_phu`)
+- **用途**: FOC架构蓝本（初始化流程、PID参数链、编码器计算、调试日志、Flash存储）
+- **关键文件**:
+  - `hpm_apps/apps/foc/software/foc_app/src/user/freertos_app.c` - `Init_func` 参考初始化顺序
+  - `hpm_apps/apps/foc/software/foc_app/src/foc/foc_fast/foc_api.c` - `Init_foc` / `FocOpenTest` / 参数辨识
+  - `hpm_apps/apps/foc/software/foc_app/src/foc/foc_fast/foc_data.c` - `ResetControlData` / `InitFlashData`
+  - `hpm_apps/apps/foc/software/foc_app/src/foc/foc_fast/foc_bsp.c` - `dbg_cmd_set` / `dbg_log_print`
+  - `hpm_apps/apps/foc/software/foc_app/src/foc/foc_fast/encoder.c` - `Encoder_data_Calculate` / `Encoder_out_data_Calculate`
+  - `hpm_apps/apps/foc/software/foc_app/src/foc/foc_fast/foc_controller.c` - `set_ver_par(id)` PID参数按硬件ID分组
+- **移植策略**: 单位沿用PHU定点格式（position=1°/1024，速度=1/1024rpm，theta_elec=0~65536）
+
+### motor_h7_0426 (`C:\Users\syx19\Desktop\src_git\motor_h7_0426`)
+- **用途**: STM32H7硬件参数参考（电流/编码器的单位换算）
+- **关键配置**:
+  - 16位ADC + 10x运放 + 0.0025Ω采样电阻 → 电流公式 `I = raw*3.3/65535/10/0.0025`
+  - 24位编码器 cpr=16777216
+  - 极对数=8
+  - 减速比=50
+
+## 关键设计
+
+### 电流单位（Q10定点）
+16位ADC推导系数：`I_Q10 = (raw-offset) * 33 / 16`（见 `foc_bsp.h` `CURRENT_TRANS_NUMERATOR/DENOMINATOR`）
+
+### 编码器单位（24位）
+- `ENCODER_BIT = 1<<24 = 16777216`
+- `ENCODER_16BIT_DIV = 8`（电角度shift：`(NPP*raw)%2^24 >> 8` → 0~65536）
+- `ENCODER_10BIT_DIV = 14`（位置shift：`raw*360 >> 14` → 1°/1024）
+- **DPT inner_raw/outer_raw映射**: 电机端=outer_raw（高速），输出端=inner_raw（低速），与motor_h7约定一致
+
+### 初始化流程（参考PHU Init_func）
+```
+外设MX_*初始化
+ → DWT_Init / DPT_Encoder_Init
+ → EN_GATE高电平 / TIM1_PWM_Start / ADC_FOC_Start / ADC_Regular_Start
+ → ADC_CalibrateOffsets          电流零点校准
+ → set_ver_par(100)              设NPP/DEFAULT_MAX_SPEED/INC_PID_*_KP（motor_h7_0426配套）
+ → Init_foc(&controller_eyou)    滤波器/斜坡/InitFlashData（读Flash或填默认）/ResetControlData
+ → 同步Ia_offset/Ib_offset
+ → Encoder_out_data_Reset        输出端编码器零位
+ → htim1 CCER |= 0x0555          使能PWM输出
+ → g_foc_openloop_enable = 1
+ → USART1_DebugRx_Start
+```
+
+### FOC主循环（ADC注入回调 10kHz）
+```
+读raw_a/raw_b
+ → 更新g_foc_current统计
+ → Encoder_data_Calculate        电机端
+ → Encoder_out_data_Calculate    输出端
+ → phase_current_sample          独立相电流处理（raw→I_a/I_b/I_c）
+ → FocOpenTest                   电角度+SVPWM
+```
+
+### PID参数链（PHU风格）
+```
+set_ver_par → INC_PID_*_KP → InitFlashData写入FlashData → ResetControlData初始化IncPID_*结构体
+```
+
+### Flash存储（HAL直写方案）
+- 扇区: Bank2 Sector 7, `0x081E0000`, 128KB
+- 驱动: `Core/Src/flash_port.c`（`Flash_EraseSector` / `Flash_WriteData` / `Flash_ReadData`）
+- FOC层: `WriteRunDataToFlash()` / `ReadDataFromAddress()`
+- 触发: 启动时自动读取（版本不匹配则用默认值写回）+ 运行时 `logid 160` 写入 / `logid 161` 擦除
+
+### 调试串口（USART1 @ 115200，HPU兼容命令格式）
+- DMA IDLE接收，`foc_bsp.c` 中 `dbg_cmd_set()` 解析
+- 支持命令:
+  - `logid<N>`: 切换日志类型（10=角度,30=电压,40=电流PI,50=速度,60=CCR,70=相电流,90=原始ADC,100=位置,160=写Flash,161=擦Flash）
+  - `logfreq<N>`: 日志打印周期ms
+  - `logtest<N>`: 测试模式（预留）
+  - `CurrentPIDKp<a>Ki<b>Kd<c>`: 电流环PID
+  - `SpeedPIDKp<a>Ki<b>Kd<c>`: 速度环PID
+  - `PositionPIDKp<a>Ki<b>Kd<c>`: 位置环PID
+  - `RuncmdXMYtarZ`: 启动运行（cmd=foc_run,M=mode,tar=目标值）
 
 ## 硬件配置
 
@@ -83,17 +165,25 @@ Build Time Elapsed: 00:00:19
 ### 核心模块
 - **Core/Src/main.c**: 主程序入口
 - **Core/Src/tim.c**: 定时器配置与工具函数
-- **Core/Src/adc.c**: ADC配置与采样
-- **Core/Src/encoder.c**: DPT编码器驱动
+- **Core/Src/adc.c**: ADC配置与采样 + FOC主循环（ADC注入回调）
+- **Core/Src/encoder.c**: DPT编码器RS485驱动（异步DMA读取）
+- **Core/Src/usart.c**: USART1 printf + 调试命令DMA接收
+- **Core/Src/flash_port.c**: STM32H743内部Flash读写封装
 
 ### FOC算法（foc/目录）
 - **foc_fast/**: FOC核心算法
-  - `foc_api.c`: FOC API接口
+  - `foc_api.c`: FOC API接口（Init_foc/FocOpenTest/MC_Loop_Schedule）
   - `foc_kernel.c`: FOC核心运算（Clarke/Park变换、SVPWM）
-  - `foc_current_loop.c`: 电流环控制
+  - `foc_current_loop.c`: 电流环控制 + phase_current_sample
   - `foc_speed_loop.c`: 速度环控制
   - `foc_position_loop.c`: 位置环控制
-  - `foc_bsp.c`: 板级支持包（跨平台适配层）
+  - `foc_controller.c`: 控制器初始化 + set_ver_par(id) PID参数
+  - `foc_data.c`: Flash数据管理（InitFlashData/ResetControlData/WriteRunDataToFlash）
+  - `foc_bsp.c`: 板级支持包（pwm_ccr_set/dbg_cmd_set/dbg_log_print）
+  - `encoder_calc.c`: 编码器计算（Encoder_data_Calculate/Encoder_out_data_Calculate）
+  - `func_filter.c`: 滤波器（滑动均值等）
+  - `func_pid.c`: PID控制器
+  - `func_subprogram.c`: 斜坡滤波器等子程序
 
 - **foc_app/**: 应用层功能
   - `ifly_fault.c`: 故障检测与保护

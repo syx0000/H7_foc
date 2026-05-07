@@ -158,6 +158,12 @@ FluxIdentErr runFluxIdent(ControllerStruct *c,
   c->foc_run         = 1;
   // printf("Flux ident: ramping up over %ums...\r\n", (unsigned)cfg->accel_ms);
 
+  /* 提前声明以避免 goto cleanup 跨过初始化 */
+  float we1 = 0.0f;
+  float Rs  = 0.0f;
+  float num = 0.0f;
+  float den = 0.0f;
+
   /* 1.a) 缓加速到目标转速 */
   if (ramp_velocity(c, 0, cfg->speed_target, cfg->accel_ms) != 0) {
     r->err_code = c->ServoErrFlag.All_Flag ? FLUX_IDENT_ERR_FAULT
@@ -181,7 +187,7 @@ FluxIdentErr runFluxIdent(ControllerStruct *c,
     goto cleanup;
   }
   average_window(&acc1, &r->uq1, &r->iq1, &r->id1, &r->we);
-  float we1 = r->we;
+  we1 = r->we;
   // printf("Flux ident: window 1 done, switching id_ref...\r\n");
 
   /* 3) 切 id_ref_2,等 settle 让电流环跟踪到位 */
@@ -198,9 +204,11 @@ FluxIdentErr runFluxIdent(ControllerStruct *c,
     r->err_code = FLUX_IDENT_ERR_FAULT;
     goto cleanup;
   }
-  float we2;
-  average_window(&acc2, &r->uq2, &r->iq2, &r->id2, &we2);
-  r->we = 0.5f * (we1 + we2);
+  {
+    float we2;
+    average_window(&acc2, &r->uq2, &r->iq2, &r->id2, &we2);
+    r->we = 0.5f * (we1 + we2);
+  }
 
   /* 5) 校验 */
   if (fabsf(r->we) < MIN_WE_RAD_S) {
@@ -213,10 +221,10 @@ FluxIdentErr runFluxIdent(ControllerStruct *c,
   }
 
   /* 6) 计算 ψ_f (Rs 补偿) */
-  float Rs   = cfg->rs_known;
-  float num  = (r->uq1 - Rs * r->iq1) * r->id2
-             - (r->uq2 - Rs * r->iq2) * r->id1;
-  float den  = r->we * (r->id2 - r->id1);
+  Rs   = cfg->rs_known;
+  num  = (r->uq1 - Rs * r->iq1) * r->id2
+       - (r->uq2 - Rs * r->iq2) * r->id1;
+  den  = r->we * (r->id2 - r->id1);
   r->flux    = num / den;
 
   /* 7) 成功路径缓减速回零,避免突然停止冲击 */
