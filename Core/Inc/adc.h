@@ -65,6 +65,15 @@ void ADC_FOC_Start(void);
 /* 启动前校准零点（电机静止状态下采样N次取平均） */
 void ADC_CalibrateOffsets(uint16_t n_samples);
 
+/* 规则通道实时数据（VDC/温度，TIM6触发，1kHz采样） */
+extern volatile uint32_t g_vdc_raw;         /* VDC平均值（2次采样） */
+extern volatile uint32_t g_temp_motor_raw;  /* 电机温度原始值 */
+extern volatile uint32_t g_temp_mos_raw;    /* MOS温度原始值 */
+extern volatile uint32_t g_reg_callback_count;  /* 规则通道回调计数 */
+
+/* 启动规则通道DMA采样（TIM6 TRGO触发） */
+void ADC_Regular_Start(void);
+
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

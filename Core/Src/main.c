@@ -133,6 +133,10 @@ int main(void)
 	/* 启动ADC注入采样链路（TIM1 TRGO→ADC1/ADC2同步） */
 	ADC_FOC_Start();
 
+	/* 启动ADC规则通道DMA采样（TIM6 TRGO→VDC/温度） */
+	HAL_TIM_Base_Start(&htim6);
+	ADC_Regular_Start();
+
 	/* 电流零点校准（电机静止，IGBT未输出时） */
 	printf("Calibrating ADC offsets...\r\n");
 	HAL_Delay(100);  // 等待ADC稳定
@@ -230,6 +234,30 @@ int main(void)
 //				rate_hz, cnt_now, ia, ib, off_a, off_b,
 //				t_done/240, (t_done%240)*10/240);
 //		}
+
+		/* ADC监控（注入10kHz + 规则1kHz） */
+		static uint32_t adc_mon_tick = 0;
+		if (HAL_GetTick() - adc_mon_tick >= 1000) {
+			adc_mon_tick = HAL_GetTick();
+
+			/* 注入通道（电流） */
+			int32_t ia = g_foc_current.i_a_raw;
+			int32_t ib = g_foc_current.i_b_raw;
+			uint32_t inj_cnt = g_foc_current.sample_count;
+
+			/* 规则通道（VDC/温度） */
+			uint32_t vdc = g_vdc_raw;
+			uint32_t t_motor = g_temp_motor_raw;
+			uint32_t t_mos = g_temp_mos_raw;
+
+			/* 调试：检查ADC1规则通道状态 */
+			uint32_t adc1_state = hadc1.State;
+			uint32_t dma_state = hadc1.DMA_Handle->State;
+			uint32_t cb_cnt = g_reg_callback_count;
+
+			printf("ADC_Inj(10kHz): Ia=%ld Ib=%ld Cnt=%lu | ADC_Reg(1kHz): VDC=%lu T_motor=%lu T_mos=%lu | State:ADC=0x%lX DMA=0x%lX CB=%lu\r\n",
+				ia, ib, inj_cnt, vdc, t_motor, t_mos, adc1_state, dma_state, cb_cnt);
+		}
   }
   /* USER CODE END 3 */
 }

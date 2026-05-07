@@ -23,6 +23,16 @@
 /* USER CODE BEGIN 0 */
 #include "tim.h"
 
+/* 规则通道DMA缓冲区（双ADC同步模式，VDC采2次求平均） */
+static uint32_t adc_reg_buffer[2];  /* [0]=VDC+TEMP_MOTOR, [1]=VDC+TEMP_MOS */
+
+/* 规则通道实时数据 */
+volatile uint32_t g_vdc_raw = 0;         /* VDC平均值（2次采样） */
+volatile uint32_t g_temp_motor_raw = 0;  /* 电机温度原始值 */
+volatile uint32_t g_temp_mos_raw = 0;    /* MOS温度原始值 */
+volatile uint32_t g_reg_callback_count = 0;  /* 规则通道回调计数（调试用） */
+
+/* FOC电流采样数据 */
 volatile FOC_CurrentSample_t g_foc_current = {0};
 volatile int32_t g_adc_offset_a = 0;
 volatile int32_t g_adc_offset_b = 0;
@@ -60,9 +70,9 @@ void MX_ADC1_Init(void)
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.NbrOfConversion = 2;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T6_TRGO;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+  hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DMA_CIRCULAR;
   hadc1.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
   hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
   hadc1.Init.OversamplingMode = ENABLE;
@@ -128,7 +138,6 @@ void MX_ADC1_Init(void)
 
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_8;
   sConfig.Rank = ADC_REGULAR_RANK_2;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
@@ -165,7 +174,7 @@ void MX_ADC2_Init(void)
   hadc2.Init.ContinuousConvMode = DISABLE;
   hadc2.Init.NbrOfConversion = 2;
   hadc2.Init.DiscontinuousConvMode = DISABLE;
-  hadc2.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+  hadc2.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DMA_CIRCULAR;
   hadc2.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
   hadc2.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
   hadc2.Init.OversamplingMode = ENABLE;
@@ -272,10 +281,10 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
     hdma_adc1.Init.Direction = DMA_PERIPH_TO_MEMORY;
     hdma_adc1.Init.PeriphInc = DMA_PINC_DISABLE;
     hdma_adc1.Init.MemInc = DMA_MINC_ENABLE;
-    hdma_adc1.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
-    hdma_adc1.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
-    hdma_adc1.Init.Mode = DMA_NORMAL;
-    hdma_adc1.Init.Priority = DMA_PRIORITY_VERY_HIGH;
+    hdma_adc1.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    hdma_adc1.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    hdma_adc1.Init.Mode = DMA_CIRCULAR;
+    hdma_adc1.Init.Priority = DMA_PRIORITY_HIGH;
     hdma_adc1.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
     if (HAL_DMA_Init(&hdma_adc1) != HAL_OK)
     {
@@ -329,7 +338,7 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
     hdma_adc2.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
     hdma_adc2.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
     hdma_adc2.Init.Mode = DMA_NORMAL;
-    hdma_adc2.Init.Priority = DMA_PRIORITY_VERY_HIGH;
+    hdma_adc2.Init.Priority = DMA_PRIORITY_LOW;
     hdma_adc2.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
     if (HAL_DMA_Init(&hdma_adc2) != HAL_OK)
     {
@@ -440,6 +449,39 @@ void ADC_FOC_Start(void)
     /* 注入通道：ADC2必须先启动（从机），再启动ADC1（主机） */
     HAL_ADCEx_InjectedStart(&hadc2);
     HAL_ADCEx_InjectedStart_IT(&hadc1);  /* 主机开中断，JEOC时触发回调 */
+}
+
+/**
+  * @brief  启动ADC规则通道DMA采样（VDC/温度，TIM6触发）
+  * @note   双ADC同步模式，只需启动主机ADC1，数据包含ADC1+ADC2
+  *         缓冲区格式：[0]=VDC+TEMP_MOTOR, [1]=VDC+TEMP_MOS（VDC采2次求平均）
+  */
+void ADC_Regular_Start(void)
+{
+    /* 双ADC同步模式，启动主机ADC1的DMA */
+    HAL_ADCEx_MultiModeStart_DMA(&hadc1, adc_reg_buffer, 2);
+}
+
+/**
+  * @brief  规则通道DMA传输完成回调（双ADC同步模式）
+  * @note   H7 HAL中 MultiMode Regular DMA 完成只走 HAL_ADC_ConvCpltCallback，
+  *         不存在 HAL_ADCEx_MultiModeConvCpltCallback。
+  *         CDR寄存器：低16位=ADC1数据，高16位=ADC2数据。
+  */
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
+{
+    if (hadc->Instance == ADC1) {
+        g_reg_callback_count++;
+
+        uint16_t vdc1       = adc_reg_buffer[0] & 0xFFFF;   /* ADC1 Rank1: VDC */
+        uint16_t temp_motor = adc_reg_buffer[0] >> 16;      /* ADC2 Rank1: TEMP_MOTOR */
+        uint16_t vdc2       = adc_reg_buffer[1] & 0xFFFF;   /* ADC1 Rank2: VDC */
+        uint16_t temp_mos   = adc_reg_buffer[1] >> 16;      /* ADC2 Rank2: TEMP_MOS */
+
+        g_vdc_raw        = (vdc1 + vdc2) / 2;
+        g_temp_motor_raw = temp_motor;
+        g_temp_mos_raw   = temp_mos;
+    }
 }
 
 /**
