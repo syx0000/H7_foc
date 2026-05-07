@@ -53,10 +53,12 @@ typedef int32_t  INT32;
 #endif
 
 /**********************************************************************************************/
-// adc-offset* 3.3 * 1024 /4096*10*0.007= adc-offset* 165 / 14
-// （adc-offset）*3300mV/4096*1024/44 = （adc-offset）*75/4
-#define CURRENT_TRANS_NUMERATOR -75    //
-#define CURRENT_TRANS_DENOMINATOR 4    //
+// STM32H7 16位ADC + 10x运放 + 0.0025Ω采样电阻
+// I(A) = (raw - offset) * 3.3 / 65535 / 10 / 0.0025
+// I_Q10 = I * 1024 = (raw - offset) * 3.3 * 1024 / 65535 / 10 / 0.0025
+//       ≈ (raw - offset) * 33 / 16   (误差 <0.01%)
+#define CURRENT_TRANS_NUMERATOR 33
+#define CURRENT_TRANS_DENOMINATOR 16
 
 //
 #define ENCODER_BIT 524288         // 19  //1048567     //20

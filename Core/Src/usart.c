@@ -22,6 +22,7 @@
 
 /* USER CODE BEGIN 0 */
 #include <stdio.h>
+#include <string.h>
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart1;
@@ -381,6 +382,30 @@ void isr_print(const char *str)
     // Non-blocking: skip if UART is busy
     if (HAL_UART_GetState(&huart1) != HAL_UART_STATE_BUSY_TX) {
         HAL_UART_Transmit_DMA(&huart1, isr_buf, len);
+    }
+}
+
+#define DBG_RX_BUF_SIZE 128
+static uint8_t usart1_rx_dma_buf[DBG_RX_BUF_SIZE];
+
+extern uint8_t dbgRecvBuf[1024];
+extern volatile uint16_t usart_rx_len;
+
+void USART1_DebugRx_Start(void)
+{
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart1, usart1_rx_dma_buf, DBG_RX_BUF_SIZE);
+    __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);
+}
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+    if (huart->Instance == USART1) {
+        if (usart_rx_len == 0) {
+            memcpy(dbgRecvBuf, usart1_rx_dma_buf, Size);
+            usart_rx_len = Size;
+        }
+        HAL_UARTEx_ReceiveToIdle_DMA(&huart1, usart1_rx_dma_buf, DBG_RX_BUF_SIZE);
+        __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);
     }
 }
 /* USER CODE END 1 */

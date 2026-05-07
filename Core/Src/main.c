@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include "encoder.h"
 #include "foc_api.h"
+#include "foc_bsp.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -151,6 +152,9 @@ int main(void)
 	/* 使能PWM输出并启动开环测试 */
 	htim1.Instance->CCER |= 0x0555;  // Enable channel output
 	g_foc_openloop_enable = 1;       // 使能ADC回调中的FocOpenTest
+
+	/* 启动USART1调试命令接收 */
+	USART1_DebugRx_Start();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -160,7 +164,15 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-		/* 开环测试在ADC中断中调用 */
+		/* 调试串口命令解析 */
+		dbg_cmd_set();
+
+		/* 非阻塞周期调用日志打印 */
+		static uint32_t log_tick = 0;
+		if (HAL_GetTick() - log_tick >= logPriodMs) {
+			log_tick = HAL_GetTick();
+			dbg_log_print();
+		}
 
 		/* 每1秒打印一次状态 */
 		static uint32_t stat_tick = 0;

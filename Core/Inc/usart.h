@@ -45,6 +45,7 @@ void MX_USART2_UART_Init(void);
 
 /* USER CODE BEGIN Prototypes */
 void isr_print(const char *str);  // ISR-safe non-blocking print
+void USART1_DebugRx_Start(void);  // 启动USART1调试命令接收
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

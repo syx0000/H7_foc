@@ -15,6 +15,9 @@
 #include "ifly_fault_api.h"
 #include "ifly_led.h"
 #include "tim.h"
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 uint8_t dbgRecvBuf[1024];
 volatile uint16_t usart_rx_len = 0;
@@ -127,8 +130,197 @@ uint8_t get_ver_id(void) {
     return 0;
 }
 
+extern ControllerStruct controller_eyou;
+
 void dbg_cmd_set(void) {
+    char *loc;
+    char *token;
+
+    if (usart_rx_len == 0) return;
+
+    if (NULL != strstr((const char *)dbgRecvBuf, "logid")) {
+        loc        = strstr((char *)dbgRecvBuf, "logid");
+        token      = strtok(loc, "logid");
+        dbgLogFlag = atoi((char *)token);
+        printf("logid:%d\r\n", dbgLogFlag);
+    }
+    if (NULL != strstr((const char *)dbgRecvBuf, "logtest")) {
+        loc         = strstr((char *)dbgRecvBuf, "logtest");
+        token       = strtok(loc, "logtest");
+        testLogFlag = atoi((char *)token);
+        printf("logtest:%d\r\n", testLogFlag);
+    }
+    if (NULL != strstr((const char *)dbgRecvBuf, "logfreq")) {
+        loc        = strstr((char *)dbgRecvBuf, "logfreq");
+        token      = strtok(loc, "logfreq");
+        logPriodMs = atoi((char *)token);
+        printf("logfreq:%d\r\n", logPriodMs);
+    }
+
+    if (NULL != strstr((char *)dbgRecvBuf, "CurrentPID")) {
+        printf("CurrentPID:%d, %d, %d\r\n",
+               controller_eyou.IncPID_QAxis.P,
+               controller_eyou.IncPID_QAxis.I,
+               controller_eyou.IncPID_QAxis.D);
+        loc = strstr((char *)dbgRecvBuf, "Kp");
+        if (loc != NULL) {
+            token          = strtok(loc, "Kp");
+            uint32_t Data0 = atoi(token);
+            loc            = strstr((char *)dbgRecvBuf, "Ki");
+            token          = strtok(loc, "Ki");
+            uint32_t Data1 = atoi(token);
+            loc            = strstr((char *)dbgRecvBuf, "Kd");
+            token          = strtok(loc, "Kd");
+            uint32_t Data2 = atoi(token);
+
+            controller_eyou.IncPID_QAxis.P = Data0; controller_eyou.FlashData.Current_Kp = Data0;
+            controller_eyou.IncPID_QAxis.I = Data1; controller_eyou.FlashData.Current_Ki = Data1;
+            controller_eyou.IncPID_QAxis.D = Data2; controller_eyou.FlashData.Current_Kd = Data2;
+            controller_eyou.IncPID_DAxis.P = Data0;
+            controller_eyou.IncPID_DAxis.I = Data1;
+            controller_eyou.IncPID_DAxis.D = Data2;
+            printf("CurrentPID:%d, %d, %d\r\n",
+                   controller_eyou.IncPID_QAxis.P,
+                   controller_eyou.IncPID_QAxis.I,
+                   controller_eyou.IncPID_QAxis.D);
+        }
+    }
+
+    if (NULL != strstr((char *)dbgRecvBuf, "SpeedPID")) {
+        printf("SpeedPID:%d, %d, %d\r\n",
+               controller_eyou.IncPID_Speed.P,
+               controller_eyou.IncPID_Speed.I,
+               controller_eyou.IncPID_Speed.D);
+        loc = strstr((char *)dbgRecvBuf, "Kp");
+        if (loc != NULL) {
+            token          = strtok(loc, "Kp");
+            uint32_t Data0 = atoi(token);
+            loc            = strstr((char *)dbgRecvBuf, "Ki");
+            token          = strtok(loc, "Ki");
+            uint32_t Data1 = atoi(token);
+            loc            = strstr((char *)dbgRecvBuf, "Kd");
+            token          = strtok(loc, "Kd");
+            uint32_t Data2 = atoi(token);
+
+            controller_eyou.IncPID_Speed.P = Data0; controller_eyou.FlashData.Speed_Kp = Data0;
+            controller_eyou.IncPID_Speed.I = Data1; controller_eyou.FlashData.Speed_Ki = Data1;
+            controller_eyou.IncPID_Speed.D = Data2; controller_eyou.FlashData.Speed_Kd = Data2;
+            printf("SpeedPID:%d, %d, %d\r\n",
+                   controller_eyou.IncPID_Speed.P,
+                   controller_eyou.IncPID_Speed.I,
+                   controller_eyou.IncPID_Speed.D);
+        }
+    }
+
+    if (NULL != strstr((char *)dbgRecvBuf, "PositionPID")) {
+        printf("PositionPID:%d, %d, %d\r\n",
+               controller_eyou.IncPID_Position.P,
+               controller_eyou.IncPID_Position.I,
+               controller_eyou.IncPID_Position.D);
+        loc = strstr((char *)dbgRecvBuf, "Kp");
+        if (loc != NULL) {
+            token          = strtok(loc, "Kp");
+            uint32_t Data0 = atoi(token);
+            loc            = strstr((char *)dbgRecvBuf, "Ki");
+            token          = strtok(loc, "Ki");
+            uint32_t Data1 = atoi(token);
+            loc            = strstr((char *)dbgRecvBuf, "Kd");
+            token          = strtok(loc, "Kd");
+            uint32_t Data2 = atoi(token);
+
+            controller_eyou.IncPID_Position.P = Data0; controller_eyou.FlashData.Position_Kp = Data0;
+            controller_eyou.IncPID_Position.I = Data1; controller_eyou.FlashData.Position_Ki = Data1;
+            controller_eyou.IncPID_Position.D = Data2; controller_eyou.FlashData.Position_Kd = Data2;
+            printf("PositionPID:%d, %d, %d\r\n",
+                   controller_eyou.IncPID_Position.P,
+                   controller_eyou.IncPID_Position.I,
+                   controller_eyou.IncPID_Position.D);
+        }
+    }
+
+    if (NULL != strstr((char *)dbgRecvBuf, "Run")) {
+        loc                     = strstr((char *)dbgRecvBuf, "cmd");
+        token                   = strtok(loc, "cmd");
+        controller_eyou.foc_run = atoi(token);
+
+        loc                             = strstr((char *)dbgRecvBuf, "M");
+        token                           = strtok(loc, "M");
+        controller_eyou.controller_mode = atoi(token);
+        loc                             = strstr((char *)dbgRecvBuf, "tar");
+        token                           = strtok(loc, "tar");
+        int32_t Data                    = atoi(token);
+
+        if (controller_eyou.controller_mode == PROFILE_TORQUE_MODE ||
+            controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE) {
+            controller_eyou.I_q_ref = Data;
+            controller_eyou.velocity_ref = 0;
+        } else if (controller_eyou.controller_mode == PROFILE_VELOCITY_MOCE ||
+                   controller_eyou.controller_mode == CYCLIC_SYNC_VELOCITY_MODE) {
+            controller_eyou.velocity_ref = Data * 1024 * 101;
+        } else if (controller_eyou.controller_mode == PROFILE_POSITION_MODE ||
+                   controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE) {
+            controller_eyou.position_ref = Data * 1024;
+        }
+        printf("run mod_Target: %d, %d\r\n", controller_eyou.controller_mode, Data);
+    }
+
+    memset((uint8_t *)dbgRecvBuf, 0, usart_rx_len);
+    usart_rx_len = 0;
 }
 
 void dbg_log_print(void) {
+    switch (dbgLogFlag) {
+    case 1:
+        controller_eyou.velocity_ref = 0;
+        printf("dbg_log_print test\r\n");
+        dbgLogFlag = 0;
+        break;
+    case 10:
+        printf("Angle_elec_360: %d, %d, %d, %d, %d\r\n",
+               controller_eyou.now_mechposition,
+               controller_eyou.theta_elec,
+               controller_eyou.real_position_out,
+               controller_eyou.real_position,
+               controller_eyou.dtheta_mech / 1024);
+        break;
+    case 30:
+        printf("current_get: %d,%d\r\n", controller_eyou.V_q, controller_eyou.V_d);
+        break;
+    case 40:
+        printf("current_pi: %d, %d, %d, %d, %d, %d, %d\r\n",
+               controller_eyou.I_q,
+               controller_eyou.I_d,
+               controller_eyou.V_q,
+               controller_eyou.V_d,
+               controller_eyou.I_q_ref,
+               controller_eyou.I_d_ref,
+               controller_eyou.I_q_ref_filterd);
+        break;
+    case 50:
+        printf("speed: %d, %d, %d, %d, %d\r\n",
+               controller_eyou.velocity_ref / 1024,
+               controller_eyou.velocity_ref_filterd / 1024,
+               controller_eyou.dtheta_mech / 1024,
+               controller_eyou.dtheta_mech_out / 1024,
+               controller_eyou.dtheta_mech / 1024 - controller_eyou.dtheta_mech_out / 1024);
+        break;
+    case 60:
+        printf("%d, %d, %d\r\n", controller_eyou.CCR2, controller_eyou.CCR3, controller_eyou.CCR4);
+        break;
+    case 70:
+        printf("%d, %d, %d\r\n", controller_eyou.I_a, controller_eyou.I_b, controller_eyou.I_c);
+        break;
+    case 90:
+        printf("%d, %d, %d\r\n", controller_eyou.Ia_raw, controller_eyou.Ib_raw, controller_eyou.Ic_raw);
+        break;
+    case 100:
+        printf("position: %f, %f, %f, %d\r\n",
+               controller_eyou.position_ref / 1024.0,
+               controller_eyou.real_position_out / 1024.0,
+               (controller_eyou.position_ref - controller_eyou.real_position_out) / 1024.0,
+               controller_eyou.FlashData.mech_offest_out);
+        break;
+    default:
+        break;
+    }
 }
