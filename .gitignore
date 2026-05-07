@@ -1,0 +1,15 @@
+# Keil 构建输出
+MDK-ARM/cubemx_yxsui/
+MDK-ARM/RTE/_*/
+*.uvguix.*
+*.lst
+*.bak
+*.uvoptx
+
+# 用户特定文件
+*.uvguix
+*.dbgconf
+
+# 系统文件
+.DS_Store
+Thumbs.db

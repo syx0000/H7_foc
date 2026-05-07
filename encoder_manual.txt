@@ -1,0 +1,536 @@
+DPT  v0.5
+DPT 
+
+DPT      ·  24 
+         · ±0.01°
+         ·  7 mm
+
+
+         ·  5mm 
+         · 
+         · 
+         · 
+         ·  8,000 rpm
+         · 
+         · 
+         · 
+
+
+
+
+
+
+
+      1
+
+
+  DPT-10-15-25-A-24-24-R-N-A-M
+
+                                              
+                                              M ­ 
+
+                                                 
+xx ­                                             A ­ -40 ~ 85 °C
+xxB ­                                            B ­ -40 ~ 105 °C
+                                                 C ­ -40 ~ 125 °C
+                                         
+                                         N ­ 5V
+     
+                                   
+   xx ­                            R ­ RS485
+   xxB ­                           B ­ BISS-C
+
+       
+
+          
+
+       xx ­ 
+       xxH ­ 
+
+               
+               A ­ 
+
+                 
+                 24 ­ 24 
+
+                      
+                      24 ­ 24 
+
+                                2
+
+
+                                                                                                                            
+                                                                                                                                 (2)
+                                                                                      (H7)
+                                                 2.9       (H7)(3)  M15x0.4mm    5.4                         21.6     (h7)
+                                                 2.9  AB C                 -     2.9                  (3)    21.6
+                                                 2.9                             5.4                         21.6
+                                                 2.9          9     M15x0.4mm    2.9  D      E               21.6
+                                                 2.9  9 10 12.6            -     5.4                         26.6
+          DPT-10-15-25              M10x0.4mm    2.9                             2.9     14                  26.6  25       -
+                                                 2.9          9     M20x0.4mm    5.4                         26.6
+                  DPT-10B-15B-25          -      2.9  9 10 12.6            -     2.9  15 17.6                26.6  25       -
+10-15-25 DPT-10-15-25H                           2.9                             5.4                         31.6
+                                    M10x0.4mm    2.9         14     M20x0.4mm    2.9     14                  31.6  25       
+                                                 2.9  14 15 17.6           -     5.4                         31.6
+          DPT-10B-15B-25H                 -      2.9                             2.9  15 17.6                31.6  25       
+                                                 2.9         14     M25x0.4mm    5.4                         36.6
+          DPT-15-20-30              M15x0.4mm    2.9  14 15 17.6           -     2.9     19                  36.6  30       -
+                                                 2.9                             5.4                         36.6
+15-20-30  DPT-15B-20B-30                  -      2.9         19     M25x0.4mm    2.9  20 22.6                36.6  30       -
+          DPT-15-20-30H                          2.9  19 20 22.6           -     5.4                         41.6
+                                    M15x0.4mm    2.9                             2.9     19                  41.6  30       
+                                                 2.9         19     M30x0.4mm    5.4                         41.6
+          DPT-15B-20B-30H                 -      2.9  19 20 22.6           -     2.9  20 22.6                41.6  30       
+
+          DPT-20-25-35              M20x0.4mm                24     M30x0.4mm            24                        35       -
+                                                      24 25 27.6           -
+20-25-35  DPT-20B-25B-35                  -                                           25 27.6                      35       -
+          DPT-20-25-35H                                      24     M35x0.4mm
+                                    M20x0.4mm         24 25 27.6           -             24                        35       
+
+          DPT-20B-25B-35H                 -                  29     M35x0.4mm         25 27.6                      35       
+                                                      29 30 32.6           -
+          DPT-25-30-40              M25x0.4mm                                            29                        40       -
+                                                             29
+25-30-40 DPT-25B-30B-40                   -           29 30 32.6                      30 32.6                      40       -
+                  DPT-25-30-40H
+                                    M25x0.4mm                                            29                        40       
+
+          DPT-25B-30B-40H                 -                                           30 32.6                      40       
+
+          DPT-30-35-45              M30x0.4mm                                            34                        45       -
+
+30-35-45 DPT-30B-35B-45                   -                                           35 37.6                      45       -
+                  DPT-30-35-45H
+                                    M30x0.4mm                                            34                        45       
+
+          DPT-30B-35B-45H                 -                                           35 37.6                      45       
+
+1.  3D https://kingkong.tech/encoder/DPT
+2. 
+3. 
+
+                                                      3
+
+
+                      A
+
+                         
+
+A                        Pin1
+
+ M1.6  M2  M2  M2 
+DPT 
+
+                                                                                                                         4
+
+
+             
+          SM06B-SURS-TF
+    
+                
+             AWG32 
+
+                            R                    B
+
+                         RS485               BISS-C
+                            -                SLO -
+       1                    -                SLO +
+       2                    B                 MA -
+       3                    A                  MA +
+       4   
+       5                           0VGND
+       6                                +5V
+
+                                5
+
+
+    
+    24bit
+    ±0.01°
+  
+  
+
+    4.5 ~ 5.5 V
+    15 ms
+    
+     130 mA
+    HBM, max. ±2 kV
+    CDM, max. ±1 kV
+  
+
+    
+
+  
+
+    -40 ~ 85  / -40 ~ 105  / -40 ~ 125 
+
+  
+
+                     6
+RS485  RS485 
+
+       RS485 
+
+        AB 
+        AB 
+       
+
+       RS485  UART
+       
+
+                                                  
+                                    1             LSB 
+                8 bit
+
+        B
+
+                       B     C      D
+
+       Mbps            2.5   5      7.75
+
+       
+
+         Command             B0           B1      B(N-1)
+
+       (1) 
+
+                                 7
+       
+
+RS485                                           N 
+                     N
+       0x29     (1)
+       0x30     (2)         B0 B1 B2 B3 B4 B5 B6 B7
+       0x31          2 C CRC
+       0x32          2 C CRC
+                     4 A0 A1 A2 CRC
+       0x33          4 B0 B1 B2 CRC
+                     7 A0 A1 A2 B0 B1 B2 CRC
+       0x41     
+                     5 A0 A1 A2 S CRC
+       0x42     
+                     5 B0 B1 B2 S CRC
+       0x43      
+       0x74          8 A0 A1 A2 B0 B1 B2 S CRC
+                
+                     3 T0 T1 CRC
+
+       
+
+             A       B  C                                                       S  T  CRC
+
+                                                                                    CRC 
+
+       (1)  0x31 0x29  10  10 
+       (2)  0x32 0x30  10  10 
+       (3) °C * 10
+       (4) 
+       (5) CRC CRC  x8+x7+x4+x2+x1+1 CRC-8 (x8+x7+x4+x2+x1+1)
+
+       
+
+        0x33 uint8_t Buffer[7];
+       
+       uint32_t angleInner = Buffer[2] << 16 | buffer[1] << 8 | buffer[0];
+       uint32_t anngleOutter = Buffer[5] << 16 | buffer[4] << 8 | buffer[3];
+       float angleInnerFloat = angleInner / (float)(1 << 24) * 360;
+       float angleOutterFloat = angleOutter / (float)(1 << 24) *360;
+
+                                                                             8
+BISS-C  BISS-C 
+
+        BiSS-C 
+
+                                  *            MA+                MA
+
+                                               MA-
+             SLO
+                                     SLO-                       
+                                     SLO+      *
+
+         MA  SLO  MA 
+         SLO 
+
+                                                                            tM   tP
+
+                  t MA  <                                             Idle
+
+        MA
+
+        SLO                Ack       Start "0" b(n) b(n-1)        b1 b0 Timeout      Ack
+
+                                    tACK
+
+        (1) 
+
+         MA MA 
+         MA 
+        SLO "0" MSB  MA  SLO 
+         MA  SLO  LSB 
+
+                                                                                       
+                                                                                       14 s
+                                                                                     2.5 MHz(1)
+                                     tMA       400 ns
+
+                                           f   120 kHz
+
+             ACK                     tACK                             5 bits
+
+                                     tM                               10 s
+
+                                           tP  20 s
+
+        (1)  10MHz
+
+                                               9
+BISS-C   tM SLO MA 
+         tP tCL  tM
+         tM 
+
+        
+
+          b55 : b32  b31 : b8  b7    b6    b5 : b0
+
+          24 bits    24 bits   1bit  1bit  6 bits
+
+                               (1)   (2)   CRC(3)
+
+        (1) 
+        (2)  1  0 
+        (3) CRC  x6 + x1 + 1 0x43 BISS-C  CRC  CRC-6 
+        
+
+        
+
+                     10
+  
+
+   BISS-C/RS485 
+  
+
+  /
+
+               
+
+  BISS-C      b13 b12
+
+  RS485       b7  b6
+
+          b3      b2       b1  b0
+       
+            
+
+   1  LED 
+   1  LED 
+  LED 
+
+                       11
+
+
+  CRC-8 (x8+x7+x4+x2+x1+1)
+
+//poly = x8+x7+x4+x2+x1+1
+uint8_t crcTable [256] = {
+
+        0x00, 0x97, 0xB9, 0x2E, 0xE5, 0x72, 0x5C, 0xCB, 0x5D, 0xCA, 0xE4, 0x73, 0xB8, 0x2F, 0x01, 0x96,0xBA, 0x2D, 0x03, 0x94,
+0x5F, 0xC8, 0xE6, 0x71, 0xE7, 0x70, 0x5E, 0xC9, 0x02, 0x95, 0xBB, 0x2C,0xE3, 0x74, 0x5A, 0xCD, 0x06, 0x91, 0xBF, 0x28, 0xBE,
+0x29, 0x07, 0x90, 0x5B, 0xCC, 0xE2, 0x75,0x59, 0xCE, 0xE0, 0x77, 0xBC, 0x2B, 0x05, 0x92, 0x04, 0x93, 0xBD, 0x2A, 0xE1, 0x76,
+0x58, 0xCF,0x51, 0xC6, 0xE8, 0x7F, 0xB4, 0x23, 0x0D, 0x9A, 0x0C, 0x9B, 0xB5, 0x22, 0xE9, 0x7E, 0x50, 0xC7,0xEB, 0x7C, 0x52,
+0xC5, 0x0E, 0x99, 0xB7, 0x20, 0xB6, 0x21, 0x0F, 0x98, 0x53, 0xC4, 0xEA, 0x7D,0xB2, 0x25, 0x0B, 0x9C, 0x57, 0xC0, 0xEE, 0x79,
+0xEF, 0x78, 0x56, 0xC1, 0x0A, 0x9D, 0xB3, 0x24,0x08, 0x9F, 0xB1, 0x26, 0xED, 0x7A, 0x54, 0xC3, 0x55, 0xC2, 0xEC, 0x7B, 0xB0,
+0x27, 0x09, 0x9E,0xA2, 0x35, 0x1B, 0x8C, 0x47, 0xD0, 0xFE, 0x69, 0xFF, 0x68, 0x46, 0xD1, 0x1A, 0x8D, 0xA3, 0x34,0x18, 0x8F,
+0xA1, 0x36, 0xFD, 0x6A, 0x44, 0xD3, 0x45, 0xD2, 0xFC, 0x6B, 0xA0, 0x37, 0x19, 0x8E,0x41, 0xD6, 0xF8, 0x6F, 0xA4, 0x33, 0x1D,
+0x8A, 0x1C, 0x8B, 0xA5, 0x32, 0xF9, 0x6E, 0x40, 0xD7,0xFB, 0x6C, 0x42, 0xD5, 0x1E, 0x89, 0xA7, 0x30, 0xA6, 0x31, 0x1F, 0x88,
+0x43, 0xD4, 0xFA, 0x6D,0xF3, 0x64, 0x4A, 0xDD, 0x16, 0x81, 0xAF, 0x38, 0xAE, 0x39, 0x17, 0x80, 0x4B, 0xDC, 0xF2, 0x65,0x49,
+0xDE, 0xF0, 0x67, 0xAC, 0x3B, 0x15, 0x82, 0x14, 0x83, 0xAD, 0x3A, 0xF1, 0x66, 0x48, 0xDF,0x10, 0x87, 0xA9, 0x3E, 0xF5, 0x62,
+0x4C, 0xDB, 0x4D, 0xDA, 0xF4, 0x63, 0xA8, 0x3F, 0x11, 0x86, 0xAA, 0x3D, 0x13, 0x84, 0x4F, 0xD8, 0xF6, 0x61, 0xF7, 0x60, 0x4E,
+0xD9, 0x12, 0x85, 0xAB, 0x3C
+};
+uint8_t calcCRC(uint8_t * buffer, uint8_t length){
+
+        uint8_t temp = *buffer++;
+        while(--length){
+
+                temp = *buffer++ ^ crcTable[temp];
+        }
+        return crcTable[temp];
+}
+
+                                                                               12
+  CRC-6 
+
+#define DATA_TOTAL_BIT_LENGTH 47
+
+//poly = x6+x1+1
+uint8_t tableCRC6[64] = {
+0x00, 0x03, 0x06, 0x05, 0x0C, 0x0F, 0x0A, 0x09, 0x18, 0x1B, 0x1E, 0x1D, 0x14, 0x17, 0x12, 0x11, 0x30, 0x33, 0x36, 0x35, 0x3C, 0x3F, 0x3A, 0x39, 0x28, 0x2B, 0x2E, 0x2D, 0x24, 0x27, 0x22, 0x21, 0x23,
+0x20, 0x25, 0x26, 0x2F, 0x2C, 0x29, 0x2A, 0x3B, 0x38, 0x3D, 0x3E, 0x37, 0x34, 0x31, 0x32, 0x13, 0x10, 0x15, 0x16, 0x1F, 0x1C, 0x19, 0x1A, 0x0B, 0x08, 0x0D, 0x0E, 0x07, 0x04, 0x01, 0x02
+};
+
+uint8_t calcBissCCRC(uint8_t buffer[]){
+             #define CRC_BIT_LENGTH 6
+             #define DATA_CRC_MASK ((1 << CRC_BIT_LENGTH) - 1)
+             #define DATA_WITHOUT_CRC_BIT_LENGTH (DATA_TOTAL_BIT_LENGTH - CRC_BIT_LENGTH)
+             #define TOP_BYTE_BITLENGTH (DATA_WITHOUT_CRC_BIT_LENGTH % CRC_BIT_LENGTH)
+             #if TOP_BYTE_BITLENGTH == 0
+                          #undef TOP_BYTE_BITLENGTH
+                          #define TOP_BYTE_BITLENGTH CRC_BIT_LENGTH
+             #endif
+
+             uint32_t firstWord = __REV(*(uint32_t *) buffer);
+             #if DATA_WITHOUT_CRC_BIT_LENGTH > 32
+             uint32_t secondWord = __REV(*(uint32_t *) (buffer + 4));
+             #endif
+
+             uint8_t crc = tableCRC6[firstWord >> (32 - TOP_BYTE_BITLENGTH)];
+
+             #undef CURRENT_CRC_BIT_LENGTH
+             #define CURRENT_CRC_BIT_LENGTH (TOP_BYTE_BITLENGTH + CRC_BIT_LENGTH * 1)
+             #if DATA_WITHOUT_CRC_BIT_LENGTH - CURRENT_CRC_BIT_LENGTH >= 0
+
+                          crc = tableCRC6[crc ^ (firstWord >> (32 - CURRENT_CRC_BIT_LENGTH) & DATA_CRC_MASK)];
+             #endif
+
+             #undef CURRENT_CRC_BIT_LENGTH
+             #define CURRENT_CRC_BIT_LENGTH (TOP_BYTE_BITLENGTH + CRC_BIT_LENGTH * 2)
+             #if DATA_WITHOUT_CRC_BIT_LENGTH - CURRENT_CRC_BIT_LENGTH >= 0
+
+                          crc = tableCRC6[crc ^ (firstWord >> (32 - CURRENT_CRC_BIT_LENGTH) & DATA_CRC_MASK)];
+             #endif
+
+             #undef CURRENT_CRC_BIT_LENGTH
+             #define CURRENT_CRC_BIT_LENGTH (TOP_BYTE_BITLENGTH + CRC_BIT_LENGTH * 3)
+             #if DATA_WITHOUT_CRC_BIT_LENGTH - CURRENT_CRC_BIT_LENGTH >= 0
+
+                          crc = tableCRC6[crc ^ (firstWord >> (32 - CURRENT_CRC_BIT_LENGTH) & DATA_CRC_MASK)];
+             #endif
+
+             #undef CURRENT_CRC_BIT_LENGTH
+             #define CURRENT_CRC_BIT_LENGTH (TOP_BYTE_BITLENGTH + CRC_BIT_LENGTH * 4)
+             #if DATA_WITHOUT_CRC_BIT_LENGTH - CURRENT_CRC_BIT_LENGTH >= 0
+
+                          crc = tableCRC6[crc ^ (firstWord >> (32 - CURRENT_CRC_BIT_LENGTH) & DATA_CRC_MASK)];
+             #endif
+
+             #undef CURRENT_CRC_BIT_LENGTH
+             #define CURRENT_CRC_BIT_LENGTH (TOP_BYTE_BITLENGTH + CRC_BIT_LENGTH * 5)
+             #if DATA_WITHOUT_CRC_BIT_LENGTH - CURRENT_CRC_BIT_LENGTH >= 0
+
+                          #if 32 - CURRENT_CRC_BIT_LENGTH >= 0
+                                       crc = tableCRC6[crc ^ (firstWord >> (32 - CURRENT_CRC_BIT_LENGTH) & DATA_CRC_MASK)];
+
+                          #elif 32 - CURRENT_CRC_BIT_LENGTH > -CRC_BIT_LENGTH
+                                       crc = tableCRC6[crc ^ (((firstWord << -(32 - CURRENT_CRC_BIT_LENGTH)) & DATA_CRC_MASK) | (secondWord >> (64 - CURRENT_CRC_BIT_LENGTH)))];
+
+                          #else
+                                       crc = tableCRC6[crc ^ (secondWord >> (64 - CURRENT_CRC_BIT_LENGTH) & DATA_CRC_MASK)];
+
+                          #endif
+             #endif
+
+             #undef CURRENT_CRC_BIT_LENGTH
+             #define CURRENT_CRC_BIT_LENGTH (TOP_BYTE_BITLENGTH + CRC_BIT_LENGTH * 6)
+             #if DATA_WITHOUT_CRC_BIT_LENGTH - CURRENT_CRC_BIT_LENGTH >= 0
+
+                          crc = tableCRC6[crc ^ (secondWord >> (64 - CURRENT_CRC_BIT_LENGTH) & DATA_CRC_MASK)];
+             #endif
+
+             #undef CURRENT_CRC_BIT_LENGTH
+             #define CURRENT_CRC_BIT_LENGTH (TOP_BYTE_BITLENGTH + CRC_BIT_LENGTH * 7)
+             #if DATA_WITHOUT_CRC_BIT_LENGTH - CURRENT_CRC_BIT_LENGTH >= 0
+
+                          crc = tableCRC6[crc ^ (secondWord >> (64 - CURRENT_CRC_BIT_LENGTH) & DATA_CRC_MASK)];
+             #endif
+
+             #undef CURRENT_CRC_BIT_LENGTH
+             #define CURRENT_CRC_BIT_LENGTH (TOP_BYTE_BITLENGTH + CRC_BIT_LENGTH * 8)
+             #if DATA_WITHOUT_CRC_BIT_LENGTH - CURRENT_CRC_BIT_LENGTH >= 0
+
+                          crc = tableCRC6[crc ^ (secondWord >> (64 - CURRENT_CRC_BIT_LENGTH) & DATA_CRC_MASK)];
+             #endif
+
+             #undef CURRENT_CRC_BIT_LENGTH
+             #define CURRENT_CRC_BIT_LENGTH (TOP_BYTE_BITLENGTH + CRC_BIT_LENGTH * 9)
+             #if DATA_WITHOUT_CRC_BIT_LENGTH - CURRENT_CRC_BIT_LENGTH >= 0
+
+                          crc = tableCRC6[crc ^ (secondWord >> (64 - CURRENT_CRC_BIT_LENGTH) & DATA_CRC_MASK)];
+             #endif
+
+             #if 32 - DATA_TOTAL_BIT_LENGTH >= 0
+                          crc = tableCRC6[crc ^ DATA_CRC_MASK ^ (firstWord >> (32 - DATA_TOTAL_BIT_LENGTH) & DATA_CRC_MASK)];
+
+             #elif 32 - CURRENT_CRC_BIT_LENGTH > -CRC_BIT_LENGTH
+                          crc = tableCRC6[crc ^ DATA_CRC_MASK ^ (((firstWord << -(32 - DATA_TOTAL_BIT_LENGTH)) & DATA_CRC_MASK) | (secondWord >> (64 - DATA_TOTAL_BIT_LENGTH)))];
+
+             #else
+                          crc = tableCRC6[crc ^ DATA_CRC_MASK ^ (secondWord >> (64 - DATA_TOTAL_BIT_LENGTH) & DATA_CRC_MASK)];
+
+             #endif
+
+             return crc;
+}
+
+                                                                               13
+
+
+ ARM  MCU CRC-6 
+ DATA_TOTAL_BIT_LENGTH 
+
+17M  47 16  30
+
+
+
+ buffer  32  buffer  4 
+
+
+ BISS-C  ACK 
+ CRC 4  CRC 
+
+                                                         //
+struct{                                                  //BISS-C  0x82
+                                                         //4  buffer CRC
+        uint8_t notUsedForAlignment[3];
+        uint8_t placeholder;
+        uint8_t buffer[8] __attribute__ ((aligned(4)));
+} receiveBuffer;
+
+// SPI  DMA
+//&receiveBuffer.placeholder 
+//......
+
+// CRC
+// 4  receiveBuffer.buffer 
+uint8_t crc = calcBissCCRC(receiveBuffer.buffer);
+
+//crc  0
+if ( crc != 0 ){
+
+        //crc 
+}
+
+                                                         14
+
+
+                 
+                 
+2023/09/01 V0.1  
+                  BISS-C 
+2024/03/18 V0.2  
+                 
+2024/05/01 V0.3  
+                 
+2024/12/08 V0.4   1  Pin1
+                 
+2024/12/22 V0.5
+
+                 15
+
+
+ 26  712 
+Website: https://kingkong.tech
+Email: contact@kingkong.tech
+Tel: 010-80111669
+
