@@ -14,6 +14,7 @@
 #include "ifly_fault.h"
 #include "ifly_fault_api.h"
 #include "ifly_led.h"
+#include "ifly_test.h"
 #include "tim.h"
 #include "flash_port.h"
 #include <string.h>
@@ -157,6 +158,17 @@ void dbg_cmd_set(void) {
         token      = strtok(loc, "logfreq");
         logPriodMs = atoi((char *)token);
         printf("logfreq:%d\r\n", logPriodMs);
+    }
+
+    /* 带宽测试命令: bwtest1=电流环 (保守版: 10-1500Hz, inject 0.3A, bias 0.5A) */
+    if (NULL != strstr((const char *)dbgRecvBuf, "bwtest")) {
+        loc = strstr((char *)dbgRecvBuf, "bwtest");
+        token = strtok(loc, "bwtest");
+        int which = atoi((char *)token);
+        printf("bwtest:%d\r\n", which);
+        if (which == 1) {
+            TestCurrentLoopBandwidth();
+        }
     }
 
     if (NULL != strstr((char *)dbgRecvBuf, "CurrentPID")) {
@@ -393,6 +405,75 @@ void dbg_log_print(void) {
         }
         dbgLogFlag = 0;
         break;
+    case 162: {
+        /* Dump FlashData：打印RAM和Flash中的数据，便于对比 */
+        FlashSavedData flash_copy;
+        Flash_ReadData(FLASH_USER_START_ADDR, &flash_copy, sizeof(FlashSavedData));
+
+        FlashSavedData *ram = &controller_eyou.FlashData;
+        FlashSavedData *fls = &flash_copy;
+
+        printf("===== FlashData Dump (RAM vs Flash) =====\r\n");
+        printf("                    RAM              Flash\r\n");
+        printf("[Header]\r\n");
+        printf("  Ver             %-16u %u\r\n", ram->StructVersion, fls->StructVersion);
+        printf("  CurFlag         0x%02X             0x%02X\r\n", ram->CurrentFlag, fls->CurrentFlag);
+        printf("  AngFlag         0x%02X             0x%02X\r\n", ram->AngleOffsetFlag, fls->AngleOffsetFlag);
+        printf("  PidFlag         0x%02X             0x%02X\r\n", ram->PidFlag, fls->PidFlag);
+        printf("  ArrFlag         0x%02X             0x%02X\r\n", ram->ArrivedFlag, fls->ArrivedFlag);
+        printf("  RunFlag         0x%02X             0x%02X\r\n", ram->RunDataFlag, fls->RunDataFlag);
+        printf("  PosLimFlag      0x%02X             0x%02X\r\n", ram->PositionLimitFlag, fls->PositionLimitFlag);
+        printf("  PrtFlag         0x%02X             0x%02X\r\n", ram->ProteckKeyFlag, fls->ProteckKeyFlag);
+        printf("[Iofs]\r\n");
+        printf("  Ia              %-16u %u\r\n", ram->Ia_offset, fls->Ia_offset);
+        printf("  Ib              %-16u %u\r\n", ram->Ib_offset, fls->Ib_offset);
+        printf("  Ic              %-16u %u\r\n", ram->Ic_offset, fls->Ic_offset);
+        printf("[Angle]\r\n");
+        printf("  elec0           %-16u %u\r\n", ram->elec_offest_0, fls->elec_offest_0);
+        printf("  elec1           %-16u %u\r\n", ram->elec_offest_1, fls->elec_offest_1);
+        printf("  mech            %-16ld %ld\r\n", (long)ram->mech_offest, (long)fls->mech_offest);
+        printf("  mech_out        %-16ld %ld\r\n", (long)ram->mech_offest_out, (long)fls->mech_offest_out);
+        printf("[PosPID]\r\n");
+        printf("  Kp              %-16lu %lu\r\n", (unsigned long)ram->Position_Kp, (unsigned long)fls->Position_Kp);
+        printf("  Ki              %-16lu %lu\r\n", (unsigned long)ram->Position_Ki, (unsigned long)fls->Position_Ki);
+        printf("  Kd              %-16lu %lu\r\n", (unsigned long)ram->Position_Kd, (unsigned long)fls->Position_Kd);
+        printf("  Lim             %-16ld %ld\r\n", (long)ram->Pid_PositionLimit, (long)fls->Pid_PositionLimit);
+        printf("  FF_Kp           %-16ld %ld\r\n", (long)ram->PosErrFF_Kp, (long)fls->PosErrFF_Kp);
+        printf("[SpdPID]\r\n");
+        printf("  Kp              %-16lu %lu\r\n", (unsigned long)ram->Speed_Kp, (unsigned long)fls->Speed_Kp);
+        printf("  Ki              %-16lu %lu\r\n", (unsigned long)ram->Speed_Ki, (unsigned long)fls->Speed_Ki);
+        printf("  Kd              %-16lu %lu\r\n", (unsigned long)ram->Speed_Kd, (unsigned long)fls->Speed_Kd);
+        printf("  Lim             %-16ld %ld\r\n", (long)ram->Pid_SpeedLimit, (long)fls->Pid_SpeedLimit);
+        printf("[CurPID]\r\n");
+        printf("  Kp              %-16lu %lu\r\n", (unsigned long)ram->Current_Kp, (unsigned long)fls->Current_Kp);
+        printf("  Ki              %-16lu %lu\r\n", (unsigned long)ram->Current_Ki, (unsigned long)fls->Current_Ki);
+        printf("  Kd              %-16lu %lu\r\n", (unsigned long)ram->Current_Kd, (unsigned long)fls->Current_Kd);
+        printf("  Lim             %-16ld %ld\r\n", (long)ram->Pid_CurrentLimit, (long)fls->Pid_CurrentLimit);
+        printf("[Arrive]\r\n");
+        printf("  Pos(0.1d)       %-16u %u\r\n", ram->PositionArrivedValue, fls->PositionArrivedValue);
+        printf("  Spd(0.1rpm)     %-16u %u\r\n", ram->SpeedArrivedValue, fls->SpeedArrivedValue);
+        printf("  Cur(0.1A)       %-16u %u\r\n", ram->CurrentArrivedValue, fls->CurrentArrivedValue);
+        printf("[Run]\r\n");
+        printf("  Mode            %-16u %u\r\n", ram->RunMode, fls->RunMode);
+        printf("  MaxSpd(0.1rpm)  %-16ld %ld\r\n", (long)ram->MaxSpeed, (long)fls->MaxSpeed);
+        printf("  MaxCur(0.1A)    %-16u %u\r\n", ram->MaxCurrent, fls->MaxCurrent);
+        printf("  PosMax          %-16ld %ld\r\n", (long)ram->MaxPositionLimit, (long)fls->MaxPositionLimit);
+        printf("  PosMin          %-16ld %ld\r\n", (long)ram->MinPositionLimit, (long)fls->MinPositionLimit);
+        printf("[Prtct]\r\n");
+        printf("  Sto1            %-16u %u\r\n", ram->Sto_1_protectKey, fls->Sto_1_protectKey);
+        printf("  Sto2            %-16u %u\r\n", ram->Sto_2_protectKey, fls->Sto_2_protectKey);
+        printf("  BusVol          %-16u %u\r\n", ram->BusVolProteckKey, fls->BusVolProteckKey);
+        printf("  LockRot         %-16u %u\r\n", ram->LockedRotorProtectKey, fls->LockedRotorProtectKey);
+        printf("  StoState        %-16lu %lu\r\n", (unsigned long)ram->stoStateFlag, (unsigned long)fls->stoStateFlag);
+        printf("[Misc]\r\n");
+        printf("  InvDir          %-16d %d\r\n", ram->InvertDirflag, fls->InvertDirflag);
+        printf("  BrakeT          %-16u %u\r\n", ram->brake_time, fls->brake_time);
+        printf("  Crc             0x%08lX       0x%08lX\r\n", (unsigned long)ram->Crc, (unsigned long)fls->Crc);
+        printf("[Size] sizeof(FlashSavedData)=%u\r\n", (unsigned)sizeof(FlashSavedData));
+        printf("===== End =====\r\n");
+        dbgLogFlag = 0;
+        break;
+    }
     default:
         break;
     }

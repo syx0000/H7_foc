@@ -66,6 +66,33 @@ void Encoder_data_Calculate(ControllerStruct* controller, uint16_t hz) {
         } else if (controller->theta_elec > 65536) {
             controller->theta_elec -= 65536;
         }
+
+        /* 电角度延迟补偿（30µs 编码器 + ADC + 计算延迟）
+           参考 motor_h7 实现：theta_comp = omega_elec * T_delay
+           推导：omega_elec = dtheta * FOC_FREQ (rad/s in Q16)
+                theta_comp = (dtheta * FOC_FREQ * 30e-6) (Q16)
+                           = dtheta * 10000 * 30e-6
+                           = dtheta * 0.3
+                           = (dtheta * 3) / 10 */
+        static int32_t theta_elec_last = 0;
+        int32_t dtheta = controller->theta_elec - theta_elec_last;
+
+        /* 处理 wrap（角度跨越 0/65536 边界） */
+        if (dtheta > 32768) dtheta -= 65536;
+        if (dtheta < -32768) dtheta += 65536;
+
+        /* 延迟补偿 */
+        int32_t theta_comp = (dtheta * 3) / 10;
+
+        /* 保存未补偿的原始值（避免递归误差累积） */
+        theta_elec_last = controller->theta_elec;
+
+        /* 应用补偿 */
+        controller->theta_elec += theta_comp;
+
+        /* 处理补偿后的 wrap */
+        if (controller->theta_elec >= 65536) controller->theta_elec -= 65536;
+        if (controller->theta_elec < 0) controller->theta_elec += 65536;
     }
 
     /* 计圈 */

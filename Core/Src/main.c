@@ -34,6 +34,7 @@
 #include "foc_controller.h"
 #include "foc_data.h"
 #include "encoder_calc.h"
+#include "ifly_test.h"
 #include "can_wly.h"
 /* USER CODE END Includes */
 
@@ -183,7 +184,7 @@ int main(void)
 //	/* Ld/Lq 辨识前再次对齐 d 轴，消除 Rs 辨识期间转子可能的偏移 */
 //	alignDAxis(&controller_eyou);
 	measurePhaseInductanceAC(&controller_eyou, Rs_measured);
-	autoTuneCurrentLoopPI(Rs_measured, controller_eyou.ident_test.Ld, controller_eyou.ident_test.Lq);
+	//autoTuneCurrentLoopPI(Rs_measured, controller_eyou.ident_test.Ld, controller_eyou.ident_test.Lq);
 
 	/* 7. 复位控制数据（清辨识期间积分器残留） */
 	ResetControlData(&controller_eyou);
@@ -219,6 +220,9 @@ int main(void)
 			log_tick = HAL_GetTick();
 			dbg_log_print();
 		}
+
+		/* 带宽测试 done 标志轮询 + 结果打印 */
+		Test_log_print();
 
 		/* CAN 1ms tick (主动上报模式, 默认关闭) */
 		static uint32_t can_tick = 0;

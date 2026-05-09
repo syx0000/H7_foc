@@ -47,7 +47,7 @@ extern volatile uint8_t USART_CONTROL;
 #define WEAK_MAGN_MARGIN 5      //弱磁速度超前裕度
 
 /*死区补偿功能配置*/
-#define USE_DEADTIME_COMPENSATION 1     // 死区补偿使能开关：1开启，0关闭
+#define USE_DEADTIME_COMPENSATION 0     // 死区补偿使能开关：1开启，0关闭
 #define DEADTIME_TICKS 50               // 死区时间（时钟周期数）
 #define PWM_CLOCK_HZ 200000000          // PWM时钟频率 200MHz
 #define DEADTIME_COMP_VOLTAGE 246       // 死区补偿电压 Q10格式 (0.24V * 1024)
@@ -75,6 +75,7 @@ extern volatile uint8_t USART_CONTROL;
 
 // #define PWM_FREQUENCY                               20000
 #define FOC_FREQUENCY 10000    // 20k整数倍
+#define CURRENT_LOOP_TARGET_BW_HZ 650  // 电流环 autoTune 目标带宽 (Hz)
 #define VELOCETY_CALCULATE_DIV 2
 #define POSITION_CALCULATE_DIV 4
 #define SPEED_LOOP_FRE (FOC_FREQUENCY / VELOCETY_CALCULATE_DIV)

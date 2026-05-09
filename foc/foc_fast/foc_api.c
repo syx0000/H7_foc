@@ -434,8 +434,6 @@ void measurePhaseInductanceAC(ControllerStruct* controller, float Rs) {
            Lq * 1000.0f, Z_q, INJ_FREQ_HZ, Rs);
 }
 
-#define CURRENT_LOOP_TARGET_BW_HZ 800
-
 void autoTuneCurrentLoopPI(float Rs, float Ld, float Lq) {
     (void)Ld;
     float Ts = 1.0f / FOC_FREQUENCY;

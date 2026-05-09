@@ -102,8 +102,8 @@ void set_ver_par(uint8_t id) {
     INC_PID_SPEED_KI    = 10;
     INC_PID_SPEED_KD    = 0;
     POSERRFF_KP         = 300;
-    INC_PID_CURRENT_KP  = 100;                // 保守起步
-    INC_PID_CURRENT_KI  = 20;
+    INC_PID_CURRENT_KP  = 45;                // 保守起步
+    INC_PID_CURRENT_KI  = 4;
     INC_PID_CURRENT_KD  = 0;
   }
   INC_PID_POSITION_LIMIT = DEFAULT_MAX_SPEED;

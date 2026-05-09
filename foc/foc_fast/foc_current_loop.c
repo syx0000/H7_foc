@@ -631,6 +631,14 @@ int16_t bw_test_run(CurrentLoopBWTest* test, int32_t iq_feedback) {
 *******************************************************************************/
 void bw_test_print_results(CurrentLoopBWTest* test) {
   printf("\r\n===== Current Loop Bandwidth Test Results =====\r\n");
+  printf("Kp=%d Ki=%d Kd=%d PID_Div=%u Iq_ref=%d Iq_inject=%.0f TargetBW=%dHz\r\n",
+         (int)controller_eyou.IncPID_QAxis.P,
+         (int)controller_eyou.IncPID_QAxis.I,
+         (int)controller_eyou.IncPID_QAxis.D,
+         (unsigned)controller_eyou.IncPID_QAxis.PID_Div,
+         (int)controller_eyou.I_q_ref,
+         test->amplitude,
+         CURRENT_LOOP_TARGET_BW_HZ);
   printf("Freq(Hz)\tGain(dB)\tPhase(deg)\r\n");
   for (uint16_t i = 0; i < test->current_point; i++) {
     printf("%.1f\t\t%.2f\t\t%.1f\r\n",
@@ -639,26 +647,103 @@ void bw_test_print_results(CurrentLoopBWTest* test) {
            test->phase_deg[i]);
   }
 
-  // 找 -3dB 带宽
+  /* ---- 分析各项指标 ---- */
+
+  /* 1. 找谐振峰 */
+  float gain_low = test->gain_db[0];
+  float gain_peak = gain_low;
+  uint16_t peak_idx = 0;
+  for (uint16_t i = 0; i < test->current_point; i++) {
+    if (test->gain_db[i] > gain_peak) {
+      gain_peak = test->gain_db[i];
+      peak_idx = i;
+    }
+  }
+  uint8_t has_peak = (gain_peak - gain_low > 1.0f);
+
+  /* 2. -3dB 带宽（有峰从峰值算，无峰从低频基准算） */
   float bw = 0;
-  float gain_0 = test->gain_db[0];  // 低频基准增益
-  for (uint16_t i = 1; i < test->current_point; i++) {
-    if (test->gain_db[i] < gain_0 - 3.0f) {
-      // 线性插值
+  float bw_target = has_peak ? (gain_peak - 3.0f) : (gain_low - 3.0f);
+  uint16_t bw_start = has_peak ? (peak_idx + 1) : 1;
+  for (uint16_t i = bw_start; i < test->current_point; i++) {
+    if (test->gain_db[i] < bw_target) {
       float f0 = test->freq_list[i - 1];
       float f1 = test->freq_list[i];
       float g0 = test->gain_db[i - 1];
       float g1 = test->gain_db[i];
-      float target = gain_0 - 3.0f;
-      bw = f0 + (f1 - f0) * (target - g0) / (g1 - g0);
+      bw = f0 + (f1 - f0) * (bw_target - g0) / (g1 - g0);
       break;
     }
   }
-  if (bw > 0)
-    printf("-3dB Bandwidth: %.1f Hz\r\n", bw);
-  else
-    printf("-3dB point not reached in test range\r\n");
 
+  /* 3. 0dB 穿越频率（增益从负穿到正） */
+  float f_0dB = 0;
+  for (uint16_t i = 1; i < test->current_point; i++) {
+    if (test->gain_db[i - 1] < 0.0f && test->gain_db[i] >= 0.0f) {
+      float f0 = test->freq_list[i - 1];
+      float f1 = test->freq_list[i];
+      float g0 = test->gain_db[i - 1];
+      float g1 = test->gain_db[i];
+      f_0dB = f0 + (f1 - f0) * (0.0f - g0) / (g1 - g0);
+      break;
+    }
+  }
+
+  /* 4. 阻尼比（从峰值反推，Mp = 1 / (2ζ√(1-ζ²))，Mp > 1 时近似 ζ ≈ 1/(2Mp)） */
+  float zeta = 0.707f;  /* 无峰默认值 */
+  if (has_peak) {
+    float Mp = powf(10.0f, gain_peak / 20.0f);
+    if (Mp > 1.0f) {
+      /* 精确解 ζ = √((1 - √(1 - 1/Mp²)) / 2) */
+      float inside = 1.0f - 1.0f / (Mp * Mp);
+      if (inside > 0.0f) {
+        zeta = sqrtf((1.0f - sqrtf(inside)) * 0.5f);
+      } else {
+        zeta = 0.5f / Mp;  /* fallback */
+      }
+    }
+  }
+
+  /* 5. 相位裕度（经验公式 PM ≈ 100 × ζ，ζ < 0.7 时有效） */
+  float pm = 100.0f * zeta;
+  if (pm > 70.0f) pm = 70.0f;
+
+  /* 6. 阶跃超调（%） */
+  float overshoot = 0.0f;
+  if (zeta < 1.0f) {
+    float denom = sqrtf(1.0f - zeta * zeta);
+    if (denom > 0.01f) {
+      overshoot = expf(-3.14159f * zeta / denom) * 100.0f;
+    }
+  }
+
+  /* ---- 打印汇总 ---- */
+  printf("\r\n---- Performance Summary ----\r\n");
+  if (has_peak) {
+    printf("Resonance peak:     %6.2f dB @ %6.1f Hz  [recommend <3dB]\r\n",
+           gain_peak, test->freq_list[peak_idx]);
+    if (bw > 0) {
+      printf("-3dB Bandwidth:    %7.1f Hz (from peak)  [recommend fs/10~fs/5 = 1000~2000Hz]\r\n", bw);
+    } else {
+      printf("-3dB Bandwidth:      >%.1f Hz (beyond test range)  [recommend fs/10~fs/5]\r\n",
+             test->freq_list[test->current_point - 1]);
+    }
+  } else {
+    printf("Low-freq gain:      %6.2f dB (flat, no resonance)\r\n", gain_low);
+    if (bw > 0) {
+      printf("-3dB Bandwidth:    %7.1f Hz  [recommend fs/10~fs/5 = 1000~2000Hz]\r\n", bw);
+    } else {
+      printf("-3dB Bandwidth:      >%.1f Hz (beyond test range)  [recommend fs/10~fs/5]\r\n",
+             test->freq_list[test->current_point - 1]);
+    }
+  }
+  if (f_0dB > 0) {
+    printf("0dB crossover:     %7.1f Hz  [closed-loop BW ~ 1.3x this]\r\n", f_0dB);
+  }
+  printf("Damping ratio:      %6.2f       [recommend 0.4~0.7]\r\n", zeta);
+  printf("Phase margin (est): %5.0f deg     [recommend 45~60 deg, >30 min]\r\n", pm);
+  printf("Overshoot (est):    %5.0f %%       [recommend 5~25%%]\r\n", overshoot);
+  printf("\r\nReferences: Krishnan \"Electric Motor Drives\", Ogata \"Modern Control\"\r\n");
   printf("================================================\r\n");
 }
 

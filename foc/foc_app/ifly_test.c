@@ -39,6 +39,11 @@ extern ifly_Err_Pro_Type motorProValue;
 #define TEST_MOTOR_POSIT_MODE PROFILE_POSITION_MODE
 
 void Test_log_print(void) {
+  /* 带宽测试完成 → 主循环中打印结果 (ISR 只能置 done 标志) */
+  if (controller_eyou.bw_test.done) {
+    bw_test_print_results(&controller_eyou.bw_test);
+    controller_eyou.bw_test.done = 0;
+  }
 }
 
 void TestBusOverUdc(void) {
@@ -75,6 +80,14 @@ void TestUVWCurrentOver(void) {
 }
 
 void TestCurrentLoopBandwidth(void) {
+  /* 保守版: 10-2500Hz 扫频, 注入 0.3A (Q10=307), 工作点偏置 0.5A (Q10=512) */
+  controller_eyou.controller_mode = TEST_MOTOR_CURRENT_MODE;
+  controller_eyou.I_q_ref         = 512;
+  controller_eyou.foc_run         = 1;
+
+  bw_test_init(&controller_eyou.bw_test, 10.0f, 2500.0f, 307.0f);
+
+  printf("BW test started: 10-2500Hz, 0.3A inject, bias 0.5A\r\n");
 }
 
 void TestSpeedLoopBandwidth(void) {
