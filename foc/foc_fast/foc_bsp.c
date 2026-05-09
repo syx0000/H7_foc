@@ -160,7 +160,7 @@ void dbg_cmd_set(void) {
     }
 
     if (NULL != strstr((char *)dbgRecvBuf, "CurrentPID")) {
-        printf("CurrentPID:%d, %d, %d\r\n",
+        printf("CurrentPID1:%d, %d, %d\r\n",
                controller_eyou.IncPID_QAxis.P,
                controller_eyou.IncPID_QAxis.I,
                controller_eyou.IncPID_QAxis.D);
@@ -181,7 +181,7 @@ void dbg_cmd_set(void) {
             controller_eyou.IncPID_DAxis.P = Data0;
             controller_eyou.IncPID_DAxis.I = Data1;
             controller_eyou.IncPID_DAxis.D = Data2;
-            printf("CurrentPID:%d, %d, %d\r\n",
+            printf("CurrentPID2:%d, %d, %d\r\n",
                    controller_eyou.IncPID_QAxis.P,
                    controller_eyou.IncPID_QAxis.I,
                    controller_eyou.IncPID_QAxis.D);
@@ -282,6 +282,18 @@ void dbg_cmd_set(void) {
         set_phase_voltage(&controller_eyou, 0, 0, 0);
         controller_eyou.foc_run = old_run;
         printf("inject test done\r\n");
+    }
+
+    /* Cali: 电角度偏置辨识 + 擦 Flash + 重新写入
+       流程同 PHU: ElecAngleEstimate → Flash_EraseSector → WriteDataToFlash */
+    if (NULL != strstr((char *)dbgRecvBuf, "Cali")) {
+        ElecAngleEstimate(&controller_eyou);
+        if (Flash_EraseSector() != HAL_OK) {
+            printf("Cali: Flash erase FAIL\r\n");
+        } else {
+            WriteDataToFlash();
+            printf("Cali done\r\n");
+        }
     }
 
     if (NULL != strstr((char *)dbgRecvBuf, "Run")) {

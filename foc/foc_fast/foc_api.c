@@ -379,18 +379,35 @@ float measurePhaseResistance(ControllerStruct* controller) {
     return Rs;
 }
 
+
+// 高频注入配置 (用于电感辨识)
+#define INJ_FREQ_HZ 600.0f          // 注入频率（Hz），采样10kHz时每周期20点，同步检测相位干净
+#define INJ_VOLTAGE_AMPL 0.5f       // 注入电压幅值（V）
+
 void measurePhaseInductanceAC(ControllerStruct* controller, float Rs) {
     uint8_t old_foc_run = controller->foc_run;
-    controller->foc_run = 1;
 
-    // d轴电感
+    /* 钉死电角度 → AC 注入方向固定在 A 相 / B 相方向，避免编码器未标定时方向随机 */
+    controller->theta_elec = 0;
+
+    /* 先 init（把 ident.enable 置 1，填好参数），再开 foc_run，
+       避免 ISR 先看到 foc_run=1、enable=0 而走一次 PI 分支 */
     ident_inductance_init(&controller->ident_test, 0, INJ_FREQ_HZ,
                           INJ_VOLTAGE_AMPL * 1024, Rs);
+    controller->foc_run = 1;
     while (!controller->ident_test.done) {
         HAL_Delay(1);
     }
     ident_inductance_compute(&controller->ident_test);
     float Ld = controller->ident_test.Ld;
+    double v_amp_d = sqrt((double)controller->ident_test.v_sin * controller->ident_test.v_sin +
+                          (double)controller->ident_test.v_cos * controller->ident_test.v_cos);
+    double i_amp_d = sqrt((double)controller->ident_test.i_sin * controller->ident_test.i_sin +
+                          (double)controller->ident_test.i_cos * controller->ident_test.i_cos);
+    float Z_d = (i_amp_d > 0) ? (float)(v_amp_d / i_amp_d) : 0.0f;
+
+    /* 再 pin 一次 theta，避免 d 轴测完到 q 轴 init 之间编码器覆盖 */
+    controller->theta_elec = 0;
 
     // q轴电感
     ident_inductance_init(&controller->ident_test, 1, INJ_FREQ_HZ,
@@ -400,12 +417,21 @@ void measurePhaseInductanceAC(ControllerStruct* controller, float Rs) {
     }
     ident_inductance_compute(&controller->ident_test);
     float Lq = controller->ident_test.Lq;
+    double v_amp_q = sqrt((double)controller->ident_test.v_sin * controller->ident_test.v_sin +
+                          (double)controller->ident_test.v_cos * controller->ident_test.v_cos);
+    double i_amp_q = sqrt((double)controller->ident_test.i_sin * controller->ident_test.i_sin +
+                          (double)controller->ident_test.i_cos * controller->ident_test.i_cos);
+    float Z_q = (i_amp_q > 0) ? (float)(v_amp_q / i_amp_q) : 0.0f;
 
+    /* ISR 到达 settle+measure 会自动把 enable 清零，这里再显式清一次做保底 */
+    controller->ident_test.enable = 0;
     set_phase_voltage(controller, 0, 0, 0);
     controller->foc_run = old_foc_run;
 
-    printf("Ld = %.3f mH (Rs comp = %.3f Ohm)\r\n", Ld * 1000.0f, Rs);
-    printf("Lq = %.3f mH (Rs comp = %.3f Ohm)\r\n", Lq * 1000.0f, Rs);
+    printf("Ld = %.4f mH  Z_d=%.4fOhm  (freq=%.0fHz Rs=%.4fOhm)\r\n",
+           Ld * 1000.0f, Z_d, INJ_FREQ_HZ, Rs);
+    printf("Lq = %.4f mH  Z_q=%.4fOhm  (freq=%.0fHz Rs=%.4fOhm)\r\n",
+           Lq * 1000.0f, Z_q, INJ_FREQ_HZ, Rs);
 }
 
 #define CURRENT_LOOP_TARGET_BW_HZ 800

@@ -101,10 +101,6 @@ extern volatile uint8_t USART_CONTROL;
 #define SPEED_ARRIVED_TIME 32       // 速度环机械臂位置到达判定
 #define CURRENT_ARRIVED_TIME 32     // 电流环机械臂位置到达判定
 
-// 高频注入配置 (用于电感辨识)
-#define INJ_FREQ_HZ 2000.0f         // 注入频率（Hz），受 FOC_FREQ 限制不能太高
-#define INJ_VOLTAGE_AMPL 1.0f       // 注入电压幅值（V）
-
 // 运行模式相关
 #ifdef CIA_402_AXIS
 #define NO_MODE 0               /**< \brief No mode*/

@@ -359,11 +359,11 @@ int fputc(int ch, FILE *f)
 
     if ((ch == '\n') || (printf_len >= PRINTF_BUF_SIZE))
     {
-        /* 阻塞等待上一帧DMA发完，避免 printf_buf 被多次 printf 抢写造成乱序 */
-        while (HAL_UART_GetState(&huart1) == HAL_UART_STATE_BUSY_TX);
+        /* 只看 gState；HAL_UART_GetState 会把 RxState 或上来，
+           RX DMA 长开时组合成 BUSY_TX_RX，== BUSY_TX 比较永远不等 */
+        while (huart1.gState == HAL_UART_STATE_BUSY_TX);
         HAL_UART_Transmit_DMA(&huart1, printf_buf, printf_len);
-        /* 等本帧DMA也发完，确保下一次进 fputc 时 printf_buf 可以安全复用 */
-        while (HAL_UART_GetState(&huart1) == HAL_UART_STATE_BUSY_TX);
+        while (huart1.gState == HAL_UART_STATE_BUSY_TX);
         printf_len = 0;
     }
     return ch;
@@ -379,8 +379,8 @@ void isr_print(const char *str)
         isr_buf[len++] = *str++;
     }
 
-    // Non-blocking: skip if UART is busy
-    if (HAL_UART_GetState(&huart1) != HAL_UART_STATE_BUSY_TX) {
+    // Non-blocking: skip if UART is busy (只看 gState)
+    if (huart1.gState != HAL_UART_STATE_BUSY_TX) {
         HAL_UART_Transmit_DMA(&huart1, isr_buf, len);
     }
 }

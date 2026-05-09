@@ -57,7 +57,7 @@
 extern ControllerStruct controller_eyou;
 uint8_t open_loop_mode = 0;  // 0=自动旋转, 1=编码器跟随
 int16_t v_d_test = 0;        // d轴电压（Q10格式）
-int16_t v_q_test = 1024;      // q轴电压（Q10格式，约0.5V）
+int16_t v_q_test = 512;      // q轴电压（Q10格式，约0.5V）
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -188,7 +188,7 @@ int main(void)
 	ResetControlData(&controller_eyou);
 
 	/* 8. 辨识完成，设置运行状态 */
-	controller_eyou.foc_run = 0;
+	controller_eyou.foc_run = 2;
 	printf("FOC initialization done, NPP=%d, foc_run=%d\r\n", NPP, controller_eyou.foc_run);
 
 	/* 启动USART1调试命令接收 */
@@ -197,6 +197,10 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+	g_foc_openloop_enable = USEFOC_OPEN_TEST;//开环测试
+	if(g_foc_openloop_enable == 1) {
+		controller_eyou.foc_run = 0;
+	}
   while (1)
   {
     /* USER CODE END WHILE */

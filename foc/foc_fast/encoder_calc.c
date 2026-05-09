@@ -15,14 +15,24 @@ extern ControllerStruct controller_eyou;
 /* 速度换算位移除数：24位编码器，2^14=16384（PHU 原为 19位时用 2^9=512） */
 #define SPEED_SHIFT_DIV 16384.0f
 
-/* 获取电机端角度原始值（inner，24位） */
+/* 获取电机端角度原始值（outer，24位）
+   InvertDirflag=1 时镜像（ENCODER_BIT - raw），与 pwm_ccr_set / phase_current_sample
+   的 U/V 相序交换保持一致；否则反向运行时 elec_offest_1 公式相当于差一个相位补偿，
+   导致 q 轴施力大部分落到 d 轴上、转子静止 */
 static inline uint32_t get_motor_angle_raw(DPT_Angles *a) {
     DPT_GetLatestAngles_ISR(a);
+    if (controller_eyou.FlashData.InvertDirflag == 1) {
+        return ENCODER_BIT - a->outer_raw;
+    }
     return a->outer_raw;
 }
 
-/* 获取输出端角度原始值（outer，24位） */
+/* 获取输出端角度原始值（inner，24位）
+   同理：InvertDirflag=1 时镜像，让位置环在两个方向上都自洽 */
 static inline uint32_t get_output_angle_raw(DPT_Angles *a) {
+    if (controller_eyou.FlashData.InvertDirflag == 1) {
+        return ENCODER_BIT_OUT - a->inner_raw;
+    }
     return a->inner_raw;
 }
 
