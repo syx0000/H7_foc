@@ -15,9 +15,12 @@
 // #include "cia402appl.h"  /* EtherCAT removed */
 #include "func_subprogram.h"
 #include "func_pid.h"
+#include "foc_controller.h"
 #include "flash_port.h"
+#include "encoder.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 Portection_Value Threshold_buffer;
 
@@ -79,57 +82,128 @@ void ResetControlData(ControllerStruct* controller) {
 
 /*******************************************************************************
   函数名: InitFlashData
-  描  述: 上电初始化FLASH中的运行所需数据。
-          1) 先从Flash读取，若版本匹配则采用Flash值
-          2) 版本不匹配/首次上电，用 set_ver_par 的默认值填充并写回Flash
+  描  述: 上电初始化FLASH中的运行所需数据（对齐PHU实现）
+          按 Flag 分阶段处理：Current/AngleOffset/Pid/Arrived/RunData/ProteckKey/brake_time/sto
+          首次上电或版本不匹配时，各段用对应的 Defualt* 函数填充默认值
+          改动过的段累计到 Temp，最后写回 Flash
 ********************************************************************************/
 uint8_t InitFlashData(ControllerStruct* controller) {
-    /* 1. 尝试从Flash读取 */
-    FlashSavedData flash_backup;
+    uint8_t Temp = 0;
+
+    /* 1. 先从Flash读 */
     ReadDataFromAddress(controller, MOTORID0_RUN_DATA_ADDRESS);
 
-    if (controller->FlashData.StructVersion == FLASH_STRUCT_VERSION) {
-        printf("Flash: version OK (%u), use stored params\r\n",
-               (unsigned)controller->FlashData.StructVersion);
-        printf("FlashData: CurPID=%u/%u/%u  SpdPID=%u/%u/%u  PosPID=%u/%u/%u  FF=%u\r\n",
-               (unsigned)controller->FlashData.Current_Kp,
-               (unsigned)controller->FlashData.Current_Ki,
-               (unsigned)controller->FlashData.Current_Kd,
-               (unsigned)controller->FlashData.Speed_Kp,
-               (unsigned)controller->FlashData.Speed_Ki,
-               (unsigned)controller->FlashData.Speed_Kd,
-               (unsigned)controller->FlashData.Position_Kp,
-               (unsigned)controller->FlashData.Position_Ki,
-               (unsigned)controller->FlashData.Position_Kd,
-               (unsigned)controller->FlashData.PosErrFF_Kp);
-        return 0;
+    /* 2. 版本检查：不匹配则强制重新初始化所有段 */
+    if (controller->FlashData.StructVersion != FLASH_STRUCT_VERSION) {
+        printf("Flash struct version mismatch (got %u, expect %u), force reinit\r\n",
+               (unsigned)controller->FlashData.StructVersion, FLASH_STRUCT_VERSION);
+        controller->FlashData.StructVersion   = FLASH_STRUCT_VERSION;
+        controller->FlashData.CurrentFlag     = 0xFFFF;
+        controller->FlashData.AngleOffsetFlag = 0xFFFF;
+        controller->FlashData.PidFlag         = 0xFFFF;
+        controller->FlashData.ArrivedFlag     = 0xFFFF;
+        controller->FlashData.RunDataFlag     = 0xFFFF;
+        controller->FlashData.ProteckKeyFlag  = 0xFFFF;
+        Temp = 0xFF;
     }
 
-    printf("Flash: version mismatch (got 0x%08X, expect %u), re-init\r\n",
-           (unsigned)controller->FlashData.StructVersion, FLASH_STRUCT_VERSION);
+    printf("Flash: InvertDirflag=%d, mech_offest_out=%d, elec_offest_0/1=%d/%d\r\n",
+           controller->FlashData.InvertDirflag,
+           (int)controller->FlashData.mech_offest_out,
+           controller->FlashData.elec_offest_0, controller->FlashData.elec_offest_1);
 
-    /* 2. 用 set_ver_par 设置的全局默认值填充 FlashData */
-    (void)flash_backup;
-    controller->FlashData.StructVersion = FLASH_STRUCT_VERSION;
-    controller->FlashData.Current_Kp = INC_PID_CURRENT_KP;
-    controller->FlashData.Current_Ki = INC_PID_CURRENT_KI;
-    controller->FlashData.Current_Kd = INC_PID_CURRENT_KD;
-    controller->FlashData.Speed_Kp   = INC_PID_SPEED_KP;
-    controller->FlashData.Speed_Ki   = INC_PID_SPEED_KI;
-    controller->FlashData.Speed_Kd   = INC_PID_SPEED_KD;
-    controller->FlashData.Position_Kp = INC_PID_POSITION_KP;
-    controller->FlashData.Position_Ki = INC_PID_POSITION_KI;
-    controller->FlashData.Position_Kd = INC_PID_POSITION_KD;
-    controller->FlashData.PosErrFF_Kp = POSERRFF_KP;
-    controller->FlashData.Pid_PositionLimit = INC_PID_POSITION_LIMIT;
-    controller->FlashData.MaxSpeed = DEFAULT_MAX_SPEED;
-
-    /* 3. 写回Flash */
-    if (WriteRunDataToFlash(controller, MOTORID0_RUN_DATA_ADDRESS) == 0) {
-        printf("Flash: default params saved\r\n");
+    /* 3. 电流零偏：未校准或为空时重新获取 */
+    if ((controller->FlashData.CurrentFlag == 0xFFFF) ||
+        (controller->FlashData.CurrentFlag == 0x0000)) {
+        controller->FlashData.CurrentFlag = OFFEST_IS_CORRECTED_FLAG;
+        PhaseCurrentOffsetEstimate(controller);
+        Temp++;
     }
 
-    printf("FlashData: CurPID=%u/%u/%u  SpdPID=%u/%u/%u  PosPID=%u/%u/%u  FF=%u\r\n",
+    /* 4. 电角度偏移：失败或首次上电时做一次电角度辨识（需要无抱闸+电机能转动） */
+    if ((controller->FlashData.AngleOffsetFlag == 0xFFFF) ||
+        (controller->FlashData.AngleOffsetFlag == 0x0000) ||
+        (controller->FlashData.AngleOffsetFlag == ELEC_ANGLE_ESTIMATE_FAILED))
+		{
+        controller->FlashData.AngleOffsetFlag = OFFEST_IS_CORRECTED_FLAG;
+        ElecAngleEstimate(controller);
+
+        /* 辨识失败则返回 */
+        if (controller->ServoErrFlag.Bit.LockedRotorErr ||
+            controller->ServoErrFlag.Bit.PhaseOrderErr) {
+            return 0xFF;
+        }
+        Temp++;
+    }
+//		else if (controller->FlashData.AngleOffsetFlag == MECH_OFFSET_ANGLE_IS_UPDATA_FLAG) {
+//        /* Flash中已有用户定义的零点位置，不做处理 */
+//    } else {
+//        /* 初次定位后再次上电，以当前位置为零点 */
+//        controller->FlashData.AngleOffsetFlag = FLASH_DATA_IS_UPDATA_FLAG;
+//        MechAngleOffsetEstimata(controller, 0);
+//        Temp++;
+//    }
+
+    /* 5. PID 参数：每次上电都按 set_ver_par 设置的全局变量填充（允许改源码后覆盖旧Flash） */
+		//if((controller->FlashData.PidFlag == 0xFFFF) || (controller->FlashData.PidFlag == 0x0000))
+		{
+				controller->FlashData.PidFlag = OFFEST_IS_CORRECTED_FLAG;
+				DefualtPidValue(&controller->FlashData);
+				Temp++;
+		}
+    /* 6. 指令到达阈值 */
+    if ((controller->FlashData.ArrivedFlag == 0xFFFF) ||
+        (controller->FlashData.ArrivedFlag == 0x0000)) {
+        controller->FlashData.ArrivedFlag = OFFEST_IS_CORRECTED_FLAG;
+        DefualtArrivedValue(controller);
+        Temp++;
+    }
+
+    /* 7. 运行限幅（位置/速度/电流/限位） */
+    if ((controller->FlashData.RunDataFlag == 0xFFFF) ||
+        (controller->FlashData.RunDataFlag == 0x0000)) {
+        controller->FlashData.RunDataFlag = OFFEST_IS_CORRECTED_FLAG;
+        DefualtRunDataValue(controller);
+        Temp++;
+    }
+
+    /* 8. 保护功能开关 */
+    if ((controller->FlashData.ProteckKeyFlag == 0xFFFF) ||
+        (controller->FlashData.ProteckKeyFlag == 0x0000)) {
+        controller->FlashData.ProteckKeyFlag = OFFEST_IS_CORRECTED_FLAG;
+        DefualtProteckKeyValue(controller);
+        Temp++;
+    }
+
+    /* 9. 抱闸时间等对象字典字段 */
+    if ((controller->FlashData.brake_time == 0xFFFF) ||
+        (controller->FlashData.brake_time == 0x0000)) {
+        DefualtObjectToFlash(controller);
+        Temp++;
+    }
+
+    /* 10. STO 状态标志 */
+    if (controller->FlashData.stoStateFlag == 0xFFFFFFFF) {
+        controller->FlashData.stoStateFlag = 0;
+        Temp++;
+    }
+
+    /* 11. 如有改动则写回 Flash */
+    if (Temp) {
+        WriteRunDataToFlash(controller, MOTORID0_RUN_DATA_ADDRESS);
+    }
+
+    printf("Flash: MaxPosLim=%d, MinPosLim=%d\r\n",
+           (int)controller->FlashData.MaxPositionLimit,
+           (int)controller->FlashData.MinPositionLimit);
+
+#if MOTOR_DIRECT_SAME_F
+    controller->FlashData.InvertDirflag = MOTOR_DIRECT_SAME;
+#endif
+
+    MAX_CURRENT_PRE = controller->FlashData.MaxCurrent;
+
+    printf("FlashData: CurPID=%u/%u/%u SpdPID=%u/%u/%u PosPID=%u/%u/%u FF=%u\r\n",
            (unsigned)controller->FlashData.Current_Kp,
            (unsigned)controller->FlashData.Current_Ki,
            (unsigned)controller->FlashData.Current_Kd,
@@ -144,13 +218,40 @@ uint8_t InitFlashData(ControllerStruct* controller) {
 }
 
 uint8_t PhaseCurrentOffsetEstimate(ControllerStruct* controller) {
+    /* STM32 实现：直接用 g_adc_offset_a/b（已在 ADC_CalibrateOffsets 中采得）
+       这里保留函数形参，不再做硬件采样，避免与 ADC 校准重复 */
+    extern volatile int32_t g_adc_offset_a;
+    extern volatile int32_t g_adc_offset_b;
+    controller->FlashData.Ia_offset = (uint16_t)g_adc_offset_a;
+    controller->FlashData.Ib_offset = (uint16_t)g_adc_offset_b;
+    controller->FlashData.Ic_offset = 0;
     return 0;
 }
 
 void get_offest(uint16_t* offset_1, uint16_t* offset_2) {
+    extern volatile int32_t g_adc_offset_a;
+    extern volatile int32_t g_adc_offset_b;
+    *offset_1 = (uint16_t)g_adc_offset_b;
+    *offset_2 = (uint16_t)g_adc_offset_a;
 }
 
 uint8_t DefualtPidValue(FlashSavedData* FlashData) {
+    FlashData->Position_Kp       = INC_PID_POSITION_KP;
+    FlashData->Position_Ki       = INC_PID_POSITION_KI;
+    FlashData->Position_Kd       = INC_PID_POSITION_KD;
+    FlashData->Pid_PositionLimit = INC_PID_POSITION_LIMIT;
+
+    FlashData->Speed_Kp       = INC_PID_SPEED_KP;
+    FlashData->Speed_Ki       = INC_PID_SPEED_KI;
+    FlashData->Speed_Kd       = INC_PID_SPEED_KD;
+    FlashData->PosErrFF_Kp    = POSERRFF_KP;
+    FlashData->Pid_SpeedLimit = INC_PID_SPEED_LIMIT;
+
+    FlashData->Current_Kp       = INC_PID_CURRENT_KP;
+    FlashData->Current_Ki       = INC_PID_CURRENT_KI;
+    FlashData->Current_Kd       = INC_PID_CURRENT_KD;
+    FlashData->Pid_CurrentLimit = INC_PID_CURRENT_LIMIT;
+    InitReservedFields(FlashData);
     return 0;
 }
 
@@ -192,29 +293,185 @@ uint8_t FlashLimit_Check(Portection_Value* Threshold_buffer) {
 }
 
 void ElecAngleEstimate(ControllerStruct* controller) {
+    uint16_t theta_open[4]   = {0, 16383, 32767, 49151};  // 0° 90° 180° 270°
+    int16_t v_d              = 1024;                      // 2V d轴电压（提高驱动力）
+    int16_t v_q              = 0;
+    uint32_t TempPosition[4] = {0};
+    int16_t i;
+    uint8_t dir = 0;
+    int32_t TempElecAngle;
+    uint8_t ErrTemp = 0;
+
+    int8_t InvertDirflag_pre = controller->FlashData.InvertDirflag;
+
+    /* 第一轮：InvertDirflag = -1（正向） */
+    controller->FlashData.InvertDirflag = -1;
+    for (i = 0; i < 4; i++) {
+        set_phase_voltage(controller, v_d, v_q, theta_open[i]);
+        HAL_Delay(1200);  // 等电机转到位
+
+        DPT_Angles angles;
+        DPT_GetLatestAngles(&angles);
+        TempPosition[i] = angles.outer_raw;  // 电机端编码器（高速端）
+        printf("-1: %d (%.2f deg)\r\n", (int)TempPosition[i],
+               TempPosition[i] * 360.0f / ENCODER_BIT);
+    }
+
+    set_phase_voltage(controller, 0, 0, 0);
+
+    /* 检查转动幅度和方向（归一化差值处理跨圈） */
+    dir = 0;
+    for (i = 0; i < 3; i++) {
+        int32_t temp = TempPosition[i + 1] - TempPosition[i];
+
+        /* 归一化到 [-ENCODER_BIT/2, ENCODER_BIT/2]，正确处理跨圈 */
+        int32_t temp_norm = temp;
+        if (temp > (int32_t)(ENCODER_BIT / 2))
+            temp_norm -= ENCODER_BIT;
+        else if (temp < -(int32_t)(ENCODER_BIT / 2))
+            temp_norm += ENCODER_BIT;
+
+        printf("temp = %.2f deg (norm: %.2f deg)\r\n",
+               temp * 360.0f / ENCODER_BIT,
+               temp_norm * 360.0f / ENCODER_BIT);
+
+        if (ABS(temp_norm) < (ENCODER_BIT / (NPP * 4 * 2)))  // 转角过小
+            ErrTemp++;
+
+        if (temp_norm > 0)
+            dir = 1;  // 归一化后正值 = 正向
+    }
+
+    if (ErrTemp >= 1) {
+        controller->ServoErrFlag.Bit.LockedRotorErr = 1;
+        controller->FlashData.AngleOffsetFlag       = ELEC_ANGLE_ESTIMATE_FAILED;
+        printf("Elec Angle Offset Estimate Fail (locked rotor)\r\n");
+    }
+
+    if (dir)
+        TempElecAngle = (uint16_t)(((NPP * TempPosition[0]) % ENCODER_BIT) >> ENCODER_16BIT_DIV);
+    else {
+        TempElecAngle = (uint16_t)((((NPP * TempPosition[0]) % ENCODER_BIT) >> ENCODER_16BIT_DIV) - 32767);
+        controller->ServoErrFlag.Bit.PhaseOrderErr = 1;
+        controller->FlashData.AngleOffsetFlag = ELEC_ANGLE_ESTIMATE_FAILED;
+        printf("Elec Angle Offset Estimate Fail (wrong phase order)\r\n");
+    }
+
+    controller->FlashData.elec_offest_0 = TempElecAngle;
+    printf("elec_offest_0 = %d\r\n", controller->FlashData.elec_offest_0);
+    controller->FlashData.mech_offest = TempPosition[3] * 360 >> ENCODER_10BIT_DIV;
+
+    /* 第二轮：InvertDirflag = 1（反向） */
+    controller->FlashData.InvertDirflag = 1;
+    ErrTemp = 0;
+    for (i = 0; i < 4; i++) {
+        set_phase_voltage(controller, v_d, v_q, theta_open[i]);
+        HAL_Delay(1200);
+
+        DPT_Angles angles;
+        DPT_GetLatestAngles(&angles);
+        TempPosition[i] = angles.outer_raw;
+        printf("1: %d (%.2f deg)\r\n", (int)TempPosition[i],
+               TempPosition[i] * 360.0f / ENCODER_BIT);
+    }
+
+    set_phase_voltage(controller, 0, 0, 0);
+
+    /* 第二轮预期方向是反的（InvertDirflag=1 交换了相序），所以 temp_norm < 0 才是正确 */
+    dir = 0;
+    for (i = 0; i < 3; i++) {
+        int32_t temp = TempPosition[i + 1] - TempPosition[i];
+
+        int32_t temp_norm = temp;
+        if (temp > (int32_t)(ENCODER_BIT / 2))
+            temp_norm -= ENCODER_BIT;
+        else if (temp < -(int32_t)(ENCODER_BIT / 2))
+            temp_norm += ENCODER_BIT;
+
+        printf("temp = %.2f deg (norm: %.2f deg)\r\n",
+               temp * 360.0f / ENCODER_BIT,
+               temp_norm * 360.0f / ENCODER_BIT);
+
+        if (ABS(temp_norm) < (ENCODER_BIT / (NPP * 4 * 2)))
+            ErrTemp++;
+
+        if (temp_norm < 0)
+            dir = 1;  // 第二轮反向转 = 正确
+    }
+
+    if (ErrTemp >= 1) {
+        controller->ServoErrFlag.Bit.LockedRotorErr = 1;
+        controller->FlashData.AngleOffsetFlag       = ELEC_ANGLE_ESTIMATE_FAILED;
+        printf("Elec Angle Offset Estimate Fail (locked rotor)\r\n");
+    }
+
+    if (dir)
+        TempElecAngle = (uint16_t)(((NPP * TempPosition[0]) % ENCODER_BIT) >> ENCODER_16BIT_DIV);
+    else {
+        TempElecAngle = (uint16_t)((((NPP * TempPosition[0]) % ENCODER_BIT) >> ENCODER_16BIT_DIV) - 32767);
+        controller->ServoErrFlag.Bit.PhaseOrderErr = 1;
+        controller->FlashData.AngleOffsetFlag = ELEC_ANGLE_ESTIMATE_FAILED;
+        printf("Elec Angle Offset Estimate Fail (wrong phase order)\r\n");
+    }
+
+    controller->FlashData.elec_offest_1 = TempElecAngle;
+    printf("elec_offest_1 = %d\r\n", controller->FlashData.elec_offest_1);
+    controller->FlashData.InvertDirflag = InvertDirflag_pre;
 }
 
 uint8_t MechAngleOffsetEstimata(ControllerStruct* controller, int32_t UserAngle) {
+    DPT_Angles angles;
+    DPT_GetLatestAngles(&angles);
+    uint32_t TempPosition = angles.outer_raw;
+
+    if (UserAngle == 0)
+        controller->FlashData.mech_offest = TempPosition * 360 >> ENCODER_10BIT_DIV;
+
     return 0;
 }
 
 uint8_t DefualtArrivedValue(ControllerStruct* controller) {
+    controller->FlashData.CurrentArrivedValue  = CURRENT_ARRIVED_RANGE;
+    controller->FlashData.SpeedArrivedValue    = SPEED_ARRIVED_RANGE;
+    controller->FlashData.PositionArrivedValue = COMMAND_ARRIVED_Value;
     return 0;
 }
 
 uint8_t DefualtRunDataValue(ControllerStruct* controller) {
+    controller->FlashData.RunMode    = DEFAULT_RUN_MODE;
+    controller->FlashData.MaxCurrent = DEFAULT_MAX_CURRENT;
+    controller->FlashData.MaxSpeed   = DEFAULT_MAX_SPEED;
+
+    controller->FlashData.PositionLimitFlag = POSITION_FLAG;
+    controller->FlashData.MaxPositionLimit  = DEFAULT_MAX_POSITION;
+    controller->FlashData.MinPositionLimit  = DEFAULT_MIN_POSITION;
     return 0;
 }
 
 uint8_t DefualtProteckKeyValue(ControllerStruct* controller) {
+    controller->FlashData.BusVolProteckKey      = DEFAULT_BUS_VOL_PROTECT_KEY;
+    controller->FlashData.Sto_1_protectKey      = DEFAULT_STO_1_PROTECT_KEY;
+    controller->FlashData.Sto_2_protectKey      = DEFAULT_STO_2_PROTECT_KEY;
+    controller->FlashData.LockedRotorProtectKey = DEFAULT_LOCKED_MOTOR_PROTECT_KEY;
     return 0;
 }
 
 uint8_t DefualtObjectToFlash(ControllerStruct* controller) {
+    controller->FlashData.brake_time      = BRAKE_TIME;
+    controller->FlashData.InvertDirflag   = MOTOR_DIRECT_SAME;
+    controller->FlashData.mech_offest_out = 0;
     return 0;
 }
 
 void InitReservedFields(FlashSavedData* FlashData) {
+    FlashData->temp1 = 0;
+    FlashData->temp2 = 0;
+    FlashData->temp3 = 0;
+    FlashData->temp4 = 0;
+    FlashData->temp5 = 0;
+    FlashData->temp6 = 0;
+    FlashData->temp7 = 0;
+    FlashData->temp8 = 0;
 }
 
 uint16_t User_Data_Save(uint16_t control) {

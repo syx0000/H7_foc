@@ -10,11 +10,16 @@
 // #include "cia402appl.h"  /* File not present in STM32 port */
 #include "foc_data.h"
 #include "foc_current_loop.h"
+#include "foc_speed_loop.h"
+#include "foc_position_loop.h"
 #include "func_errMes.h"
 #include "func_subprogram.h"
 #include "ifly_fault_api.h"
 #include "ifly_flux_ident.h"
 #include "ifly_inertia_ident.h"
+#include "adc.h"
+#include <math.h>
+#include <stdio.h>
 
 extern Portection_Value Threshold;
 extern Portection_Value Threshold_buffer;
@@ -236,7 +241,25 @@ void Init_foc(ControllerStruct* controller) {
 }
 
 uint8_t MC_Loop_Schedule(ControllerStruct* controller) {
-    return 0;
+    controller->count_loop++;
+
+    /* 辨识模式下只跑电流环，避免速度环/位置环干扰 */
+    if (!controller->ident_test.enable) {
+        if ((controller->count_loop % POSITION_CALCULATE_DIV) == 0) {
+            foc_position_close_loop(controller);
+        }
+
+        if ((controller->count_loop % VELOCETY_CALCULATE_DIV) == 0) {
+            foc_velocity_close_loop(controller);
+        }
+    }
+
+    if (controller->count_loop >= (POSITION_CALCULATE_DIV * VELOCETY_CALCULATE_DIV)) {
+        controller->count_loop = 0;
+    }
+
+    foc_current_close_loop(controller);
+    return 1;
 }
 
 void FocOpenTest(ControllerStruct* controller,
@@ -263,17 +286,185 @@ void FocOpenTest(ControllerStruct* controller,
     set_phase_voltage(controller, v_d, v_q, theta_used);
 }
 
+#define RS_IDENT_VOLTAGE        1.0f
+#define RS_IDENT_SETTLE_MS      200
+#define RS_IDENT_DURATION_MS    1000
+#define RS_IDENT_SAMPLE_PRD_MS  100
+#define RS_IDENT_TOL_OHM        0.001f
+
+#define DAXIS_ALIGN_VOLTAGE 1.0f
+#define DAXIS_ALIGN_MS      1000
+
+void alignDAxis(ControllerStruct* controller) {
+    /* 进辨识通道：ident_test.enable=1 让 ISR 旁路 PI 直通 V_d/V_q，
+       同时 encoder_calc 不再覆盖 theta_elec。
+       foc_run=1 让 ISR 走 MC_Loop_Schedule → foc_current_close_loop → ident 分支，
+       避免 FocOpenTest 的旋转 theta 把 CCR 刷掉。 */
+    uint8_t old_foc_run = controller->foc_run;
+
+    controller->ident_test.enable = 1;
+    controller->ident_test.amplitude = 0;                 /* DC 模式 */
+    controller->ident_test.settle_samples = 0xFFFFFFFF;   /* 防止 ISR 自动把 enable 清零 */
+    controller->ident_test.measure_samples = 0;
+    controller->ident_test.sample_count = 0;
+
+    controller->theta_elec = 0;
+    controller->V_d = (int32_t)(DAXIS_ALIGN_VOLTAGE * 1024);
+    controller->V_q = 0;
+    controller->foc_run = 1;
+
+    HAL_Delay(DAXIS_ALIGN_MS);
+
+    controller->V_d = 0;
+    controller->V_q = 0;
+    set_phase_voltage(controller, 0, 0, 0);
+    HAL_Delay(50);
+
+    controller->ident_test.enable = 0;
+    controller->foc_run = old_foc_run;
+    printf("D-axis aligned (V=%.1fV, %dms)\r\n", DAXIS_ALIGN_VOLTAGE, DAXIS_ALIGN_MS);
+}
+
 float measurePhaseResistance(ControllerStruct* controller) {
-    return 0.0f;
+    uint8_t old_foc_run = controller->foc_run;
+
+    /* 进辨识通道：enable=1 旁路 PI + 编码器不覆盖 theta_elec。
+       settle_samples 设极大值，防止 ISR 端 sample_count 自增后自动把 enable 清掉。 */
+    controller->ident_test.enable = 1;
+    controller->ident_test.done   = 0;
+    controller->ident_test.amplitude = 0;
+    controller->ident_test.settle_samples  = 0xFFFFFFFF;
+    controller->ident_test.measure_samples = 0;
+    controller->ident_test.sample_count    = 0;
+    controller->ident_test.i_sin = 0;
+    controller->ident_test.i_cos = 0;
+
+    /* 钉死电角度 → 电压矢量固定在 A 相方向；theta=0 时 Park 变换下 I_d 应等价 I_a */
+    controller->theta_elec = 0;
+    controller->V_d = (int32_t)(RS_IDENT_VOLTAGE * 1024);
+    controller->V_q = 0;
+    controller->foc_run = 1;
+
+    /* 等电流稳态 */
+    HAL_Delay(RS_IDENT_SETTLE_MS);
+
+    /* 5s 采样窗口，每 100ms 取一次，共 50 点；同时累加 I_a 和 I_d */
+    const int N = RS_IDENT_DURATION_MS / RS_IDENT_SAMPLE_PRD_MS;
+    int64_t sum_ia = 0;
+    int64_t sum_id = 0;
+    for (int i = 0; i < N; i++) {
+        HAL_Delay(RS_IDENT_SAMPLE_PRD_MS);
+        sum_ia += controller->I_a;
+        sum_id += controller->I_d;
+    }
+
+    controller->ident_test.enable = 0;
+    controller->V_d = 0;
+    controller->V_q = 0;
+    set_phase_voltage(controller, 0, 0, 0);
+    controller->foc_run = old_foc_run;
+
+    float Ia_avg = (float)sum_ia / N / 1024.0f;
+    float Id_avg = (float)sum_id / N / 1024.0f;
+    float R_ia = (fabsf(Ia_avg) > 0.01f) ? (RS_IDENT_VOLTAGE / fabsf(Ia_avg)) : 0.0f;
+    float R_id = (fabsf(Id_avg) > 0.01f) ? (RS_IDENT_VOLTAGE / fabsf(Id_avg)) : 0.0f;
+    float diff = fabsf(R_ia - R_id);
+    float Rs = (R_ia + R_id) * 0.5f;
+
+    controller->ident_test.Rs = Rs;
+    printf("Rs: R(via Ia)=%.4f  R(via Id)=%.4f  diff=%.4f  %s  (Ia=%.3fA Id=%.3fA)\r\n",
+           R_ia, R_id, diff,
+           (diff < RS_IDENT_TOL_OHM) ? "PASS" : "FAIL",
+           Ia_avg, Id_avg);
+    return Rs;
 }
 
 void measurePhaseInductanceAC(ControllerStruct* controller, float Rs) {
+    uint8_t old_foc_run = controller->foc_run;
+    controller->foc_run = 1;
+
+    // d轴电感
+    ident_inductance_init(&controller->ident_test, 0, INJ_FREQ_HZ,
+                          INJ_VOLTAGE_AMPL * 1024, Rs);
+    while (!controller->ident_test.done) {
+        HAL_Delay(1);
+    }
+    ident_inductance_compute(&controller->ident_test);
+    float Ld = controller->ident_test.Ld;
+
+    // q轴电感
+    ident_inductance_init(&controller->ident_test, 1, INJ_FREQ_HZ,
+                          INJ_VOLTAGE_AMPL * 1024, Rs);
+    while (!controller->ident_test.done) {
+        HAL_Delay(1);
+    }
+    ident_inductance_compute(&controller->ident_test);
+    float Lq = controller->ident_test.Lq;
+
+    set_phase_voltage(controller, 0, 0, 0);
+    controller->foc_run = old_foc_run;
+
+    printf("Ld = %.3f mH (Rs comp = %.3f Ohm)\r\n", Ld * 1000.0f, Rs);
+    printf("Lq = %.3f mH (Rs comp = %.3f Ohm)\r\n", Lq * 1000.0f, Rs);
 }
+
+#define CURRENT_LOOP_TARGET_BW_HZ 800
 
 void autoTuneCurrentLoopPI(float Rs, float Ld, float Lq) {
+    (void)Ld;
+    float Ts = 1.0f / FOC_FREQUENCY;
+    float omega_bw = 2.0f * M_PIf * CURRENT_LOOP_TARGET_BW_HZ;
+
+    uint16_t Kp = (uint16_t)(omega_bw * Lq * DEFAULT_PID_DIV + 0.5f);
+    uint16_t Ki = (uint16_t)(omega_bw * Rs * DEFAULT_PID_DIV * Ts + 0.5f);
+
+    if (Kp < 10) Kp = 10;
+    if (Kp > 500) Kp = 500;
+    if (Ki < 1) Ki = 1;
+    if (Ki > 200) Ki = 200;
+
+    set_current_loop_kp_ec(Kp);
+    set_current_loop_ki_ec(Ki);
+
+    printf("AutoTune Current: BW=%dHz, Lq=%.3fmH, Rs=%.3fOhm -> Kp=%d, Ki=%d\r\n",
+           CURRENT_LOOP_TARGET_BW_HZ, Lq * 1000.0f, Rs, Kp, Ki);
 }
 
+#define SPEED_LOOP_TARGET_BW_HZ    60
+#define SPEED_LOOP_ZERO_RATIO      8
+
 void autoTuneSpeedLoopPI(float J, float psi_f, uint8_t pp) {
+    if (pp == 0 || psi_f <= 0.0f || J <= 0.0f) {
+        printf("AutoTune Speed: invalid inputs (J=%.3e psi_f=%.6f Pp=%d)\r\n", J, psi_f, pp);
+        return;
+    }
+
+    float fs_w     = (float)SPEED_LOOP_FRE;
+    float Ts_w     = 1.0f / fs_w;
+    float Kt       = 1.5f * (float)pp * psi_f;
+    float omega_c  = 2.0f * M_PIf * (float)SPEED_LOOP_TARGET_BW_HZ;
+    float omega_i  = omega_c / (float)SPEED_LOOP_ZERO_RATIO;
+
+    float Kp_w     = J * omega_c / Kt;
+    float Ki_w     = Kp_w * omega_i;
+
+    const float scale = 2.0f * M_PIf / 60.0f;
+    float P_f      = Kp_w * scale * (float)DEFAULT_PID_SPEED_DIV;
+    float I_f      = Ki_w * scale * (float)DEFAULT_PID_SPEED_DIV * Ts_w;
+
+    uint16_t Kp = (uint16_t)(P_f + 0.5f);
+    uint16_t Ki = (uint16_t)(I_f + 0.5f);
+
+    if (Kp < 1)     Kp = 1;
+    if (Kp > 30000) Kp = 30000;
+    if (Ki < 1)     Ki = 1;
+    if (Ki > 1000)  Ki = 1000;
+
+    set_speed_loop_kp_ec((int32_t)Kp);
+    set_speed_loop_ki_ec((int32_t)Ki);
+
+    printf("AutoTune Speed: BW=%dHz J=%.3e psif=%.6f Pp=%d -> Kp=%d Ki=%d\r\n",
+           SPEED_LOOP_TARGET_BW_HZ, J, psi_f, pp, Kp, Ki);
 }
 
 uint32_t Set_Position_Limit(uint32_t Limit) {
@@ -452,41 +643,73 @@ int32_t set_Minposition_Limit(int32_t Limit) {
 }
 
 int32_t set_speed_loop_kp_ec(int32_t kp) {
-    return 0;
+    if (kp < 0) return -1;
+    controller_eyou.IncPID_Speed.P = kp;
+    controller_eyou.FlashData.Speed_Kp = kp;
+    return kp;
 }
 
 int32_t set_speed_loop_ki_ec(int32_t ki) {
-    return 0;
+    if (ki < 0) return -1;
+    controller_eyou.IncPID_Speed.I = ki;
+    controller_eyou.FlashData.Speed_Ki = ki;
+    return ki;
 }
 
 int32_t set_speed_loop_kd_ec(int32_t kd) {
-    return 0;
+    if (kd < 0) return -1;
+    controller_eyou.IncPID_Speed.D = kd;
+    controller_eyou.FlashData.Speed_Kd = kd;
+    return kd;
 }
 
 int32_t set_pos_error_ff_gain(int32_t gain) {
-    return 0;
+    controller_eyou.pos_err_ff_gain = gain;
+    controller_eyou.FlashData.PosErrFF_Kp = gain;
+    return gain;
 }
 
 int32_t set_position_loop_kp_ec(int32_t kp) {
-    return 0;
+    if (kp < 0) return -1;
+    controller_eyou.IncPID_Position.P = kp;
+    controller_eyou.FlashData.Position_Kp = kp;
+    return kp;
 }
 
 int32_t set_position_loop_ki_ec(int32_t ki) {
-    return 0;
+    if (ki < 0) return -1;
+    controller_eyou.IncPID_Position.I = ki;
+    controller_eyou.FlashData.Position_Ki = ki;
+    return ki;
 }
 
 int32_t set_position_loop_kd_ec(int32_t kd) {
-    return 0;
+    if (kd < 0) return -1;
+    controller_eyou.IncPID_Position.D = kd;
+    controller_eyou.FlashData.Position_Kd = kd;
+    return kd;
 }
 
 int32_t set_current_loop_kp_ec(int32_t kp) {
-    return 0;
+    if (kp < 0) return -1;
+    controller_eyou.IncPID_QAxis.P = kp;
+    controller_eyou.IncPID_DAxis.P = kp;
+    controller_eyou.FlashData.Current_Kp = kp;
+    return kp;
 }
 
 int32_t set_current_loop_ki_ec(int32_t ki) {
-    return 0;
+    if (ki < 0) return -1;
+    controller_eyou.IncPID_QAxis.I = ki;
+    controller_eyou.IncPID_DAxis.I = ki;
+    controller_eyou.FlashData.Current_Ki = ki;
+    return ki;
 }
 
 int32_t set_current_loop_kd_ec(int32_t kd) {
-    return 0;
+    if (kd < 0) return -1;
+    controller_eyou.IncPID_QAxis.D = kd;
+    controller_eyou.IncPID_DAxis.D = kd;
+    controller_eyou.FlashData.Current_Kd = kd;
+    return kd;
 }

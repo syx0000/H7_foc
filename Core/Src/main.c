@@ -32,6 +32,7 @@
 #include "foc_api.h"
 #include "foc_bsp.h"
 #include "foc_controller.h"
+#include "foc_data.h"
 #include "encoder_calc.h"
 /* USER CODE END Includes */
 
@@ -146,24 +147,49 @@ int main(void)
 	printf("Initializing FOC controller...\r\n");
 
 	/* 1. 设置电机参数（必须在Init_foc之前，PID全局变量会被controller_init引用） */
-	set_ver_par(100);  // id=100: motor_h7_0426配套，NPP=8
+	set_ver_par(90);  // id=90: motor_h7_0426配套，NPP=8
 
-	/* 2. FOC核心初始化（滤波器/斜坡/标志位/FlashData/ResetControlData） */
+	/* 2. 使能PWM输出（Init_foc 中的 ElecAngleEstimate 需要 PWM 能驱动电机） */
+	htim1.Instance->CCER |= 0x0555;
+
+	/* 3. FOC核心初始化（滤波器/斜坡/标志位/FlashData含ElecAngleEstimate/ResetControlData） */
 	Init_foc(&controller_eyou);
 
-	/* 3. 将ADC校准的零点偏置同步到FOC控制器 */
+	/* 4. 将ADC校准的零点偏置同步到FOC控制器 */
 	controller_eyou.FlashData.Ia_offset = (uint16_t)g_adc_offset_a;
 	controller_eyou.FlashData.Ib_offset = (uint16_t)g_adc_offset_b;
 
-	/* 4. 输出端编码器零位初始化（避免real_position_out跳变保护卡0） */
+	/* 5. 输出端编码器零位初始化 */
 	Encoder_out_data_Reset(controller_eyou.FlashData.MaxPositionLimit,
 	                       controller_eyou.FlashData.MinPositionLimit);
 
-	printf("FOC initialization done, NPP=%d\r\n", NPP);
+	/* 6. 开机辨识: Rs → Ld/Lq → 电流环PI自整定 */
+	printf("Starting motor identification...\r\n");
 
-	/* 使能PWM输出并启动开环测试 */
-	htim1.Instance->CCER |= 0x0555;  // Enable channel output
-	g_foc_openloop_enable = 0;       // 使能ADC回调中的FocOpenTest
+	/* 打印实际 VDC（确认 UDC 宏是否匹配硬件） */
+	extern volatile uint32_t g_vdc_raw;
+	HAL_Delay(10);
+	/* VDC: ADC 16bit, 3.3V 满量程, 分压比需根据硬件确认 */
+	float vdc_volt = g_vdc_raw * 3.3f / 65535.0f;
+	printf("VDC ADC raw = %lu, voltage (before divider scaling) = %.3f V\r\n",
+	       g_vdc_raw, vdc_volt);
+
+//	/* Rs 辨识前先对齐 d 轴，消除上电编码器位置不确定 */
+//	alignDAxis(&controller_eyou);
+
+	float Rs_measured = measurePhaseResistance(&controller_eyou);
+
+//	/* Ld/Lq 辨识前再次对齐 d 轴，消除 Rs 辨识期间转子可能的偏移 */
+//	alignDAxis(&controller_eyou);
+	measurePhaseInductanceAC(&controller_eyou, Rs_measured);
+	autoTuneCurrentLoopPI(Rs_measured, controller_eyou.ident_test.Ld, controller_eyou.ident_test.Lq);
+
+	/* 7. 复位控制数据（清辨识期间积分器残留） */
+	ResetControlData(&controller_eyou);
+
+	/* 8. 辨识完成，设置运行状态 */
+	controller_eyou.foc_run = 0;
+	printf("FOC initialization done, NPP=%d, foc_run=%d\r\n", NPP, controller_eyou.foc_run);
 
 	/* 启动USART1调试命令接收 */
 	USART1_DebugRx_Start();

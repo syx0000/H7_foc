@@ -25,7 +25,7 @@
   - `hpm_apps/apps/foc/software/foc_app/src/foc/foc_fast/foc_controller.c` - `set_ver_par(id)` PID参数按硬件ID分组
 - **移植策略**: 单位沿用PHU定点格式（position=1°/1024，速度=1/1024rpm，theta_elec=0~65536）
 
-### motor_h7_0426 (`C:\Users\syx19\Desktop\src_git\motor_h7_0426`)
+### motor_h7_0426 (`C:\Users\syx19\Desktop\src_git\90_product_260424`)
 - **用途**: STM32H7硬件参数参考（电流/编码器的单位换算）
 - **关键配置**:
   - 16位ADC + 10x运放 + 0.0025Ω采样电阻 → 电流公式 `I = raw*3.3/65535/10/0.0025`

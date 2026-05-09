@@ -21,7 +21,7 @@
 /* Runtime-controllable serial debug flag (0=off, 1=on). Replaces compile-time macro USART_CONTROL. */
 extern volatile uint8_t USART_CONTROL;
 #define USE_RTOS_LOG_PRINT 0       // RTOS的log打印功能
-#define CHANGE_PHASE_ORDER_UV 0    // 调换U V相序；
+#define CHANGE_PHASE_ORDER_UV 1    // 调换U V相序；
                                    //当电机相序从UVW变为VUW时，电机的电角度相对于机械角度发生120°的相位偏移，因为每相之间的电角度差从120°变为-120°
 #define USEFOC_OPEN_TEST 0         // 使用FOC开环测试
 #define USE_DMA_SEND 0             // 使用dma发送
@@ -60,8 +60,8 @@ extern volatile uint8_t USART_CONTROL;
 #define DEFAULT_LOCKED_MOTOR_PROTECT_KEY 10    // 20开  10关
 
 /*电机同方向旋转*/
-#define MOTOR_DIRECT_SAME -1
-#define MOTOR_DIRECT_SAME_F 0   //1默认参数使用宏定义，0默认参数使用flash值
+#define MOTOR_DIRECT_SAME 1     // 电机正向定义：1=正向，-1=反向（根据硬件接线调整）
+#define MOTOR_DIRECT_SAME_F 1   //1默认参数使用宏定义，0默认参数使用flash值
 /*抱闸延时时间默认值*/
 #define BRAKE_TIME 500
 
@@ -102,8 +102,8 @@ extern volatile uint8_t USART_CONTROL;
 #define CURRENT_ARRIVED_TIME 32     // 电流环机械臂位置到达判定
 
 // 高频注入配置 (用于电感辨识)
-#define INJ_FREQ_HZ 2000.0f         // 注入频率（Hz）
-#define INJ_VOLTAGE_AMPL 5.0f       // 注入电压幅值（V）
+#define INJ_FREQ_HZ 2000.0f         // 注入频率（Hz），受 FOC_FREQ 限制不能太高
+#define INJ_VOLTAGE_AMPL 1.0f       // 注入电压幅值（V）
 
 // 运行模式相关
 #ifdef CIA_402_AXIS

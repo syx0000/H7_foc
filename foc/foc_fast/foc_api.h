@@ -151,6 +151,7 @@ uint8_t InitFlashData(ControllerStruct* controller);
 // flash
 
 void ElecAngleEstimate(ControllerStruct* controller);
+void alignDAxis(ControllerStruct* controller);
 float measurePhaseResistance(ControllerStruct* controller);
 void measurePhaseInductanceAC(ControllerStruct* controller, float Rs);
 void autoTuneCurrentLoopPI(float Rs, float Ld, float Lq);

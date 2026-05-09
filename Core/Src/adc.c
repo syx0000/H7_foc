@@ -554,14 +554,16 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
         Encoder_data_Calculate(&controller_eyou, 10000);
         Encoder_out_data_Calculate(&controller_eyou, 10000);
 
-        /* 相电流采样处理（编码器计算后，FOC运算前）
-           参考PHU/H7架构：单独一步，把raw_a/raw_b转成I_a/I_b/I_c */
+        /* FOC 调度分支 */
         controller_eyou.Ia_raw = (uint16_t)raw_a;
         controller_eyou.Ib_raw = (uint16_t)raw_b;
-        phase_current_sample(&controller_eyou);
 
-        /* FOC开环测试（校准完成后使能） */
-        if (g_foc_openloop_enable) {
+        if (controller_eyou.foc_run >= 1) {
+            /* 闭环模式：三环调度（含 phase_current_sample + Clarke/Park + PID + SVPWM） */
+            MC_Loop_Schedule(&controller_eyou);
+        } else if (g_foc_openloop_enable) {
+            /* 开环模式：独立电流采样 + 开环SVPWM */
+            phase_current_sample(&controller_eyou);
             FocOpenTest(&controller_eyou, open_loop_mode, v_d_test, v_q_test,
                         (uint16_t)raw_a, (uint16_t)raw_b);
         }

@@ -44,15 +44,18 @@ void Encoder_data_Calculate(ControllerStruct* controller, uint16_t hz) {
 
     /* 电角度：(NPP * temp) % 2^24，右移8位 → 0~65536 */
     controller->theta_elec_raw = (uint16_t)(((NPP * temp) % ENCODER_BIT) >> ENCODER_16BIT_DIV);
-    if (controller->FlashData.InvertDirflag != 1) {
-        controller->theta_elec = controller->theta_elec_raw - controller->FlashData.elec_offest_0;
-    } else {
-        controller->theta_elec = controller->theta_elec_raw - controller->FlashData.elec_offest_1;
-    }
-    if (controller->theta_elec < 0) {
-        controller->theta_elec += 65536;
-    } else if (controller->theta_elec > 65536) {
-        controller->theta_elec -= 65536;
+    /* 辨识模式下 theta_elec 由辨识函数显式控制（例如钉死 0），此处不覆盖 */
+    if (!controller->ident_test.enable) {
+        if (controller->FlashData.InvertDirflag != 1) {
+            controller->theta_elec = controller->theta_elec_raw - controller->FlashData.elec_offest_0;
+        } else {
+            controller->theta_elec = controller->theta_elec_raw - controller->FlashData.elec_offest_1;
+        }
+        if (controller->theta_elec < 0) {
+            controller->theta_elec += 65536;
+        } else if (controller->theta_elec > 65536) {
+            controller->theta_elec -= 65536;
+        }
     }
 
     /* 计圈 */

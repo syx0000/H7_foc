@@ -49,7 +49,7 @@ typedef int32_t  INT32;
 
 /* PWM period constant (should be defined based on actual PWM configuration) */
 #ifndef PWM_T
-#define PWM_T 12000  /* Default PWM period value */
+#define PWM_T 24000  /* Default PWM period value */
 #endif
 
 /**********************************************************************************************/

@@ -90,7 +90,7 @@ void set_ver_par(uint8_t id) {
     INC_PID_CURRENT_KI  = 11;
     INC_PID_CURRENT_KD  = 0;
   }
-  if (id == 100) {
+  if (id == 90) {
     // motor_h7_0426 配套：pole_pairs=8，50:1减速，初始保守PID，后续再调
     NPP               = 8;
     DEFAULT_MAX_SPEED = 40 * 50 * 1024;       // 40rpm * 减速比50 * Q10

@@ -359,12 +359,12 @@ int fputc(int ch, FILE *f)
 
     if ((ch == '\n') || (printf_len >= PRINTF_BUF_SIZE))
     {
-				while(HAL_UART_GetState(&huart1) == HAL_UART_STATE_BUSY_TX);
-        //if ((HAL_UART_GetState(&huart1) & HAL_UART_STATE_BUSY_TX) == 0)
-        {
-            HAL_UART_Transmit_DMA(&huart1, printf_buf, printf_len);
-            printf_len = 0;
-        }
+        /* 阻塞等待上一帧DMA发完，避免 printf_buf 被多次 printf 抢写造成乱序 */
+        while (HAL_UART_GetState(&huart1) == HAL_UART_STATE_BUSY_TX);
+        HAL_UART_Transmit_DMA(&huart1, printf_buf, printf_len);
+        /* 等本帧DMA也发完，确保下一次进 fputc 时 printf_buf 可以安全复用 */
+        while (HAL_UART_GetState(&huart1) == HAL_UART_STATE_BUSY_TX);
+        printf_len = 0;
     }
     return ch;
 }

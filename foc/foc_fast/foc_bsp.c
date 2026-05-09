@@ -19,6 +19,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 uint8_t dbgRecvBuf[1024];
 volatile uint16_t usart_rx_len = 0;
@@ -237,6 +238,50 @@ void dbg_cmd_set(void) {
                    controller_eyou.IncPID_Position.I,
                    controller_eyou.IncPID_Position.D);
         }
+    }
+
+    /* injectV<mV>: 在 theta=0 注入指定 V_d (毫伏)，持续 5 秒，每 100ms 打印 I_a / I_d
+       用法: injectV2000  → V_d=2.0V
+       配合万用表测 a 相对中性点（或 a-b 线电压）验证 SVPWM 标度 */
+    if (NULL != strstr((char *)dbgRecvBuf, "injectV")) {
+        loc        = strstr((char *)dbgRecvBuf, "injectV");
+        token      = strtok(loc, "injectV");
+        int32_t mv = atoi((char *)token);
+        float v_d  = mv / 1000.0f;
+
+        printf("inject test: V_d=%.3fV, theta=0, duration=5s\r\n", v_d);
+
+        uint8_t old_run = controller_eyou.foc_run;
+        controller_eyou.foc_run = 1;
+        controller_eyou.ident_test.enable = 1;
+        controller_eyou.ident_test.amplitude = 0;
+        controller_eyou.ident_test.settle_samples = 0;
+        controller_eyou.ident_test.measure_samples = 0xFFFFFFFF;
+        controller_eyou.ident_test.sample_count = 0;
+        controller_eyou.V_d = (int32_t)(v_d * 1024);
+        controller_eyou.V_q = 0;
+        controller_eyou.theta_elec = 0;
+
+        for (int i = 0; i < 50; i++) {
+            HAL_Delay(100);
+            int32_t i_a_q10 = controller_eyou.I_a;
+            int32_t i_d_q10 = controller_eyou.I_d;
+            float i_a_amp = i_a_q10 / 1024.0f;
+            float i_d_amp = i_d_q10 / 1024.0f;
+            float r_a = (fabsf(i_a_amp) > 0.01f) ? (v_d / fabsf(i_a_amp)) : 0.0f;
+            float r_d = (fabsf(i_d_amp) > 0.01f) ? (v_d / fabsf(i_d_amp)) : 0.0f;
+            printf("[%2d] I_a=%6.3fA  I_d=%6.3fA  R(via Ia)=%.4fOhm  R(via Id)=%.4fOhm  Udc=%lu  CCR1=%lu CCR2=%lu CCR3=%lu\r\n",
+                   i, i_a_amp, i_d_amp, r_a, r_d,
+                   (unsigned long)motorProValue.Udc,
+                   (unsigned long)TIM1->CCR1, (unsigned long)TIM1->CCR2, (unsigned long)TIM1->CCR3);
+        }
+
+        controller_eyou.ident_test.enable = 0;
+        controller_eyou.V_d = 0;
+        controller_eyou.V_q = 0;
+        set_phase_voltage(&controller_eyou, 0, 0, 0);
+        controller_eyou.foc_run = old_run;
+        printf("inject test done\r\n");
     }
 
     if (NULL != strstr((char *)dbgRecvBuf, "Run")) {
