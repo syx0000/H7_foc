@@ -34,6 +34,7 @@
 #include "foc_controller.h"
 #include "foc_data.h"
 #include "encoder_calc.h"
+#include "can_wly.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -193,6 +194,9 @@ int main(void)
 
 	/* 启动USART1调试命令接收 */
 	USART1_DebugRx_Start();
+
+	/* 万里扬FDCAN协议从站初始化 (fdcan_rx_user 已在 can_wly.c 中覆盖弱符号) */
+	can_wly_init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -214,6 +218,13 @@ int main(void)
 		if (HAL_GetTick() - log_tick >= logPriodMs) {
 			log_tick = HAL_GetTick();
 			dbg_log_print();
+		}
+
+		/* CAN 1ms tick (主动上报模式, 默认关闭) */
+		static uint32_t can_tick = 0;
+		if (HAL_GetTick() - can_tick >= 1) {
+			can_tick = HAL_GetTick();
+			can_wly_tick_1ms();
 		}
 
 //		/* 每1秒打印一次状态 */
