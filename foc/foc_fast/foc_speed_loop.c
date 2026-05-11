@@ -176,7 +176,7 @@ void spd_bw_test_init(SpeedLoopBWTest* test, float freq_start, float freq_end,
                       float amplitude_base, float f_break) {
   test->freq_start = freq_start;
   test->freq_end   = freq_end;
-  test->amplitude_base = amplitude_base;  // 内部速度单位, 1rpm = 1024*101
+  test->amplitude_base = amplitude_base;  // 内部速度单位, 1rpm = 1024*25
   test->f_break    = (f_break > 0.0f) ? f_break : freq_start;
   test->points_per_decade = 10;
 
@@ -356,6 +356,13 @@ void spd_bw_test_print_results(SpeedLoopBWTest* test) {
            test->abort_freq, (unsigned)test->abort_udc, (unsigned)Threshold.OverUdc);
     printf("Hint: lower freq_end, scale inject amplitude with 1/f, or add brake resistor.\r\n");
   }
+  printf("Kp=%d Ki=%d Kd=%d PID_Div=%u vel_ref=%d inject=%.0f\r\n",
+         (int)controller_eyou.IncPID_Speed.P,
+         (int)controller_eyou.IncPID_Speed.I,
+         (int)controller_eyou.IncPID_Speed.D,
+         (unsigned)controller_eyou.IncPID_Speed.PID_Div,
+         (int)controller_eyou.velocity_ref,
+         test->amplitude_base);
   printf("Freq(Hz)\tGain(dB)\tPhase(deg)\tUdc_pk(0.1V)\r\n");
   for (uint16_t i = 0; i < test->current_point; i++) {
     printf("%.1f\t\t%.2f\t\t%.1f\t\t%u\r\n",

@@ -58,12 +58,16 @@ uint32_t DWT_CyclesToUs(uint32_t cycles);  // 周期数转微秒
 /* TIM1 PWM启动：使能输出、中断、计数器，启动CH4输出比较 */
 void TIM1_PWM_Start(void);
 
-/* TIM1时间戳（线性化：上升=CNT，下降=23999-CNT，一个完整周期0~23999 counts≈100us） */
-extern volatile uint32_t g_tim1_cc4_cnt;         /* CC4中断进入时 */
-extern volatile uint32_t g_tim1_cc4_exit_cnt;    /* CC4中断退出时 */
-extern volatile uint32_t g_tim1_enc_done_cnt;    /* 编码器读取完成时 */
-extern volatile uint32_t g_tim1_update_cnt;      /* UP中断进入时 */
-extern volatile uint32_t g_tim1_update_exit_cnt; /* UP中断退出时 */
+/* DWT时间戳（480MHz周期计数器，32位，约9秒回绕，1 cycle = 1/480 us ≈ 2.08ns） */
+extern volatile uint32_t g_tim1_cc4_cycles;         /* CC4中断进入时DWT周期 */
+extern volatile uint32_t g_tim1_cc4_exit_cycles;    /* CC4中断退出时DWT周期 */
+extern volatile uint32_t g_tim1_enc_done_cycles;    /* 编码器读取完成时DWT周期 */
+
+/* ADC注入中断时间戳 */
+extern volatile uint32_t g_adc_isr_in_cycles;       /* ADC ISR进入时DWT周期 */
+extern volatile uint32_t g_adc_isr_out_cycles;      /* ADC ISR退出时DWT周期 */
+extern volatile uint32_t g_adc_isr_cycles;      /* 上一次ADC ISR耗时（DWT周期，480MHz） */
+extern volatile uint32_t g_adc_isr_cycles_max;  /* ADC ISR最大耗时 */
 
 /* 读取TIM1线性计数值：
  * 中央对齐模式下CNT先升后降，这里转换成0~23999的连续计数 */

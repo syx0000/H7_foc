@@ -11,14 +11,15 @@
 #include "math.h"
 #include "stdlib.h"
 
-/* 默认梯形规划: 1.5 output rpm 巡航 / 30 output rpm/s 加速 (50ms 加速时间).
- * 这两个值适配当前测试架 (母线电容 ~100µF, 无刹车电阻); 接到正式驱动器后可放开. */
-#define POS_TRAPEZOID_DEFAULT_VMAX_RPM   33.0f
-#define POS_TRAPEZOID_DEFAULT_AMAX_RPS   80.0f
+/* 默认梯形规划: 100 output rpm 巡航 / 230 output rpm/s 加速 (0.435s 加速时间).
+ * 对齐 DEFAULT_MAX_SPEED = 载端 100rpm 硬限幅; 测试架不够用 (母线电容 ~100µF, 无刹车电阻)
+ * 时需下调 VMAX。 */
+#define POS_TRAPEZOID_DEFAULT_VMAX_RPM   100.0f
+#define POS_TRAPEZOID_DEFAULT_AMAX_RPS   230.0f
 /* output rpm → LSB/tick 系数 (位置环 Ts = 1/2500 s) */
 #define POS_TRAPEZOID_VMAX_SCALE         (6.0f * 1024.0f / 2500.0f)              /* ≈ 2.4576 */
 #define POS_TRAPEZOID_AMAX_SCALE         (6.0f * 1024.0f / (2500.0f * 2500.0f))  /* ≈ 9.830e-4 */
-// extern ControllerStruct controller_eyou;
+extern ControllerStruct controller_eyou;
 extern Portection_Value Threshold;
 /*******************************************************************************
   : foc_position_close_loop_pid
@@ -35,8 +36,9 @@ void foc_position_close_loop(ControllerStruct* controller) {
     controller->position_ref_filterd = PosSmoothRun(&controller->SmoothPosRef, controller);
   } else {
     controller->position_ref_filterd = controller->position_ref;
-    /* 退出 PP 模式: 清规划状态, 下次进入 PP 时强制从 real_position_out 重锚定 */
-    controller->SmoothPosRef.active = 0;
+    /* 退出 PP 模式: 清规划状态 (active + cooldown), 下次进入 PP 时强制从 real_position_out 重锚定 */
+    controller->SmoothPosRef.active   = 0;
+    controller->SmoothPosRef.cooldown = 0;
   }
 
   // 位置环带宽测试信号注入（梯形规划之后、PID 之前）
@@ -51,12 +53,17 @@ void foc_position_close_loop(ControllerStruct* controller) {
     controller->IncPID_Position.PidRun(&controller->IncPID_Position);
     controller->velocity_ref = controller->IncPID_Position.OutPut;
 
-    /* add proportional feedforward from position error */
+    /* add proportional feedforward from position error
+     * 用 int64 中间运算防溢出: pos_err_ff_gain × pos_err 在大位移时
+     * (例如 ff_gain=300, pos_err=200000) 接近 int32 上限。
+     * 限幅到 Pid_PositionLimit (= MaxSpeed) 防止 velocity_ref 被前馈打爆。 */
     {
       int32_t pos_err = controller->position_ref_filterd - controller->real_position_out;
-      /* gain stored Q10: out unit same as velocity_ref (rpm/1024) */
-      int32_t ff = (controller->pos_err_ff_gain * pos_err);
-      controller->velocity_ref += ff;
+      int64_t ff64    = (int64_t)controller->pos_err_ff_gain * pos_err;
+      int32_t lim     = controller->FlashData.Pid_PositionLimit;
+      if (ff64 >  lim) ff64 =  lim;
+      if (ff64 < -lim) ff64 = -lim;
+      controller->velocity_ref += (int32_t)ff64;
     }
   } else {
     controller->position_ref = controller->real_position_out;
@@ -130,6 +137,7 @@ void InitPosSmoothFunc(PositionRefSmooth* p) {
   p->cur_v       = 0.0f;
   p->old_pos_ref = 0;
   p->active      = 0;
+  p->cooldown    = 0;
 }
 
 /*******************************************************************************
@@ -143,13 +151,26 @@ ATTR_RAMFUNC
 int32_t PosSmoothRun(PositionRefSmooth* p, ControllerStruct* controller) {
   /* 静止状态: 始终从 real_position_out 重锚定 cur_pos, 防上次状态污染.
    * 启动条件 = "目标位置 ≠ 实际位置" (非"ref 变化"), 这样冷启动时
-   * old_pos_ref=0 与用户 tar0 重合也能正确启动. */
+   * old_pos_ref=0 与用户 tar0 重合也能正确启动.
+   * 已对齐判断带 50 LSB (≈0.05°) 死区: 避免 PID 未完全收敛 (real != ref) 时
+   * 反复触发 active=1 重启规划。死区需大于编码器噪声但小于减速箱间隙。
+   * cooldown: snap 后 100ms 内不重启, 等 PID 收敛到死区内。
+   *           但新指令(position_ref 变化)立即打破 cooldown, 不延迟响应。 */
   if (!p->active) {
+    if (p->cooldown > 0) {
+      if (controller->position_ref != p->old_pos_ref) {
+        p->cooldown = 0;  // 新指令打破冷却, 走下面的重启逻辑
+      } else {
+        p->cooldown--;
+        return (int32_t)p->cur_pos;  // 冷却期内持续输出 position_ref
+      }
+    }
     p->cur_pos     = (float)controller->real_position_out;
     p->cur_v       = 0.0f;
     p->old_pos_ref = controller->position_ref;
-    if (controller->position_ref == controller->real_position_out) {
-      return controller->position_ref;    /* 已对齐, 透传 */
+    if (labs(controller->position_ref - controller->real_position_out) < 50) {
+      p->cur_pos = (float)controller->position_ref;
+      return controller->position_ref;    /* 已对齐(死区内), 透传 */
     }
     p->active = 1;
   } else if (controller->position_ref != p->old_pos_ref) {
@@ -158,11 +179,14 @@ int32_t PosSmoothRun(PositionRefSmooth* p, ControllerStruct* controller) {
   }
 
   /* 相平面: 当前 (cur_pos, cur_v) → 目标 (ref, 0).
-   * brake_dist 是从 |cur_v| 全力刹到 0 的位移; 比较 |D| 与 brake_dist 决定
-   * 加速 / 巡航 / 减速 / 反向加速. */
-  float D          = (float)controller->position_ref - p->cur_pos;
-  float v          = p->cur_v;
-  float brake_dist = (v * v) / (2.0f * p->a_max);
+   * brake_dist 用精确离散公式: S = N*|v| - a*N*(N-1)/2, N = floor(|v|/a) + 1
+   * 连续公式 v²/(2a) 在高速时低估制动距离 ~v/2 拍位移, 导致越过目标震荡。
+   * 例: v=245.76, a=0.226 → 连续公式 133600 LSB, 实际 133921 LSB, 误差 321 LSB (0.31°) */
+  float D     = (float)controller->position_ref - p->cur_pos;
+  float v     = p->cur_v;
+  float abs_v = fabsf(v);
+  float N     = (abs_v > 0.0f) ? (floorf(abs_v / p->a_max) + 1.0f) : 0.0f;
+  float brake_dist = N * abs_v - p->a_max * N * (N - 1.0f) * 0.5f;
 
   float v_new;
   if (D > 0.0f) {
@@ -186,12 +210,16 @@ int32_t PosSmoothRun(PositionRefSmooth* p, ControllerStruct* controller) {
   p->cur_v   = v_new;
   p->cur_pos += v_new;
 
-  /* 到位 snap: ε 取一拍 a_max 速度 + 1 LSB 距离, 防止终态极限环抖动 */
+  /* 到位 snap: 清 active + 设冷却 250 拍 (100ms @2500Hz), 防止 PID 未收敛时重启。
+   * 冷却期内持续输出 position_ref, PID 自行收敛残余误差。
+   * 显式同步 old_pos_ref, 保证状态自洽 (即便 ACTIVE 路径未走也正确)。 */
   float remaining = (float)controller->position_ref - p->cur_pos;
   if (fabsf(remaining) < 1.0f && fabsf(v_new) < p->a_max) {
-    p->cur_pos = (float)controller->position_ref;
-    p->cur_v   = 0.0f;
-    p->active  = 0;
+    p->cur_pos     = (float)controller->position_ref;
+    p->cur_v       = 0.0f;
+    p->active      = 0;
+    p->cooldown    = 250;
+    p->old_pos_ref = controller->position_ref;
   }
 
   return (int32_t)p->cur_pos;
@@ -372,6 +400,13 @@ void pos_bw_test_print_results(PositionLoopBWTest* test) {
   if (test->abort_reason == 1) {
     printf("[ABORTED] at f=%.1f Hz\r\n", test->abort_freq);
   }
+  printf("Kp=%d Ki=%d Kd=%d PID_Div=%u pos_ref=%d inject=%.0f\r\n",
+         (int)controller_eyou.IncPID_Position.P,
+         (int)controller_eyou.IncPID_Position.I,
+         (int)controller_eyou.IncPID_Position.D,
+         (unsigned)controller_eyou.IncPID_Position.PID_Div,
+         (int)controller_eyou.position_ref,
+         test->amplitude_base);
   printf("Freq(Hz)\tGain(dB)\tPhase(deg)\r\n");
   for (uint16_t i = 0; i < test->current_point; i++) {
     printf("%.1f\t\t%.2f\t\t%.1f\r\n",

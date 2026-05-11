@@ -28,7 +28,7 @@ typedef enum {
 typedef struct {
   int32_t  id_ref_1;        /* Q10 A,建议 0 */
   int32_t  id_ref_2;        /* Q10 A,建议 ±1024(±1A),与 id_ref_1 拉开避免饱和差异 */
-  int32_t  speed_target;    /* 内部速度量 (rpm * 1024 * 101) */
+  int32_t  speed_target;    /* 内部速度量 (rpm * 1024 * 25) */
   uint32_t accel_ms;        /* 从 0 缓升到 speed_target 的时间,缓解速度环冲击/EMI */
   uint32_t decel_ms;        /* 从 speed_target 缓降到 0 的时间(收尾阶段) */
   uint32_t settle_ms;       /* 切 id_ref 后等稳态时间 */

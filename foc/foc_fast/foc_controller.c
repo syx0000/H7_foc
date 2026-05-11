@@ -45,60 +45,15 @@ uint8_t get_usart_control(void)
  * *#Output：None
  * ***************************************/
 void set_ver_par(uint8_t id) {
-  if (id == 14) {
-    NPP               = 10;
-    DEFAULT_MAX_SPEED = 40 * 101 * 1024;
-
-    INC_PID_POSITION_KP = 32000;              // 位置环PID
-    INC_PID_POSITION_KI = 3000;
-    INC_PID_POSITION_KD = 0;
-    INC_PID_SPEED_KP    = 2015;             // 速度环PID（PID_Div 20000→65000，按 3.25× 重标）
-    INC_PID_SPEED_KI    = 8;                // 兼顾 fs 由 2k→5k 的连续 Ki 等效（6·3.25·2/5≈7.8）
-    INC_PID_SPEED_KD    = 0;
-    POSERRFF_KP         = 600;              // 位置误差前馈增益
-    INC_PID_CURRENT_KP  = 128;              // 电流环PID
-    INC_PID_CURRENT_KI  = 26;
-    INC_PID_CURRENT_KD  = 0;
-  }
-  if (id == 17) {
-    NPP               = 10;
-    DEFAULT_MAX_SPEED = 40 * 101 * 1024;
-
-    INC_PID_POSITION_KP = 32000;              // 位置环PID
-    INC_PID_POSITION_KI = 3000;
-    INC_PID_POSITION_KD = 0;
-    INC_PID_SPEED_KP    = 2015;             // 速度环PID（PID_Div 20000→65000，按 3.25× 重标）
-    INC_PID_SPEED_KI    = 8;                // 兼顾 fs 由 2k→5k 的连续 Ki 等效（6·3.25·2/5≈7.8）
-    INC_PID_SPEED_KD    = 0;
-    POSERRFF_KP         = 600;
-    INC_PID_CURRENT_KP  = 128;              // 电流环PID
-    INC_PID_CURRENT_KI  = 26;
-    INC_PID_CURRENT_KD  = 0;
-  }
-  if (id == 20) {
-    NPP               = 14;
-    DEFAULT_MAX_SPEED = 33 * 101 * 1024;    // 临时限制到28rpm，避免极限转速时的停机
-
-    INC_PID_POSITION_KP = 85000;              // 位置环PID
-    INC_PID_POSITION_KI = 800;
-    INC_PID_POSITION_KD = 0;
-    INC_PID_SPEED_KP    = 4000;             // 速度环PID（BW=60Hz, J=1.7e-4, ψf=0.005, Pp=14, PID_Div=65000；BW 受 16-tap 反馈滤波约束）
-    INC_PID_SPEED_KI    = 40;               // 由 autoTuneSpeedLoopPI 在线辨识后覆盖
-    INC_PID_SPEED_KD    = 0;
-    POSERRFF_KP         = 300;
-    INC_PID_CURRENT_KP  = 80;              // 电流环PID
-    INC_PID_CURRENT_KI  = 11;
-    INC_PID_CURRENT_KD  = 0;
-  }
   if (id == 90) {
-    // motor_h7_0426 配套：pole_pairs=8，50:1减速，初始保守PID，后续再调
+    // motor_h7_0426 配套：pole_pairs=8，25:1减速，初始保守PID，后续再调
     NPP               = 8;
-    DEFAULT_MAX_SPEED = 40 * 50 * 1024;       // 40rpm * 减速比50 * Q10
+    DEFAULT_MAX_SPEED = 100 * 25 * 1024;       // 40rpm * 减速比25 * Q10
 
-    INC_PID_POSITION_KP = 30000;
-    INC_PID_POSITION_KI = 1000;
+    INC_PID_POSITION_KP = 3000;
+    INC_PID_POSITION_KI = 9;
     INC_PID_POSITION_KD = 0;
-    INC_PID_SPEED_KP    = 2000;
+    INC_PID_SPEED_KP    = 1500;
     INC_PID_SPEED_KI    = 10;
     INC_PID_SPEED_KD    = 0;
     POSERRFF_KP         = 300;

@@ -226,7 +226,7 @@ void weak_magn_control(ControllerStruct* controller){
   controller_eyou.Us = sliding_avg_filter(Us_buf, filter_depth, &filter_idx, controller_eyou.Us_raw, filter_valid_cnt);
   controller_eyou.voltage_error = 5*1024 - controller_eyou.Us;
   //example:20关节速度上限设置为31rpm, 指令速度27rpm时, 27-31+5 = 1 = speed_error,此时弱磁单位为 1，弱磁深度为1*(-500)
-  controller_eyou.speed_error = (controller_eyou.velocity_ref_filterd - controller_eyou.FlashData.MaxSpeed)/101/1024 + WEAK_MAGN_MARGIN;
+  controller_eyou.speed_error = (controller_eyou.velocity_ref_filterd - controller_eyou.FlashData.MaxSpeed)/25/1024 + WEAK_MAGN_MARGIN;
     if(controller_eyou.voltage_error < 0){
       if(controller_eyou.speed_error >= 0){
         integral += controller_eyou.voltage_error;

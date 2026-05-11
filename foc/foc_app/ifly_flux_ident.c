@@ -8,8 +8,8 @@
  *     I_d/I_q             : Q10 A   (1024 = 1 A)
  *     V_d/V_q             : Q10 V   (1024 = 1 V)
  *     dtheta_mech         : 电机端 rpm × 1024  (即 1 电机 rpm = 1024)
- *     velocity_ref        : 载端 rpm × 1024 × 101  (内部含减速比 101)
- *     两者数值同尺度: 内部值 1024×101 既是 "载端 1 rpm" 也是 "电机端 101 rpm × 1024"
+ *     velocity_ref        : 载端 rpm × 1024 × 25   (内部含减速比 25)
+ *     两者数值同尺度: 内部值 1024×25 既是 "载端 1 rpm" 也是 "电机端 25 rpm × 1024"
  *
  *   ω_e [rad/s] = (dtheta_mech / 1024) * (2π/60) * NPP    (用电机端 rpm 算电气角速度)
  */
@@ -25,10 +25,10 @@
 extern uint8_t NPP;
 
 /* 单位换算常量(语义严格分离):
- *   LOAD_RPM_INTERNAL : 载端 rpm → velocity_ref / dtheta_mech 内部值(已含减速比 101)
+ *   LOAD_RPM_INTERNAL : 载端 rpm → velocity_ref / dtheta_mech 内部值(已含减速比 25)
  *   MOTOR_RPM_Q10     : 电机端 rpm × 1024 = dtheta_mech 物理意义(用于电气 ω_e 换算)
  */
-#define LOAD_RPM_INTERNAL        (1024.0f * 101.0f)
+#define LOAD_RPM_INTERNAL        (1024.0f * 25.0f)
 #define MOTOR_RPM_Q10            (1024.0f)
 #define MIN_WE_RAD_S             (5.0f)          /* 低于该 ω_e 不做辨识(避免分母过小) */
 #define MIN_DELTA_ID_Q10         (256)           /* 0.25 A,低于则放大噪声 */

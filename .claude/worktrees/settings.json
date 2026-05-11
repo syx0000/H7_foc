@@ -1,0 +1,55 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read(**/*)",
+      "Bash(ls *)",
+      "Bash(dir *)",
+      "Bash(cat *)",
+      "Bash(mkdir *)",
+      "Bash(touch *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(make)",
+      "Bash(make clean)",
+      "Bash(make compile)",
+      "Bash(gcc *)",
+      "Bash(armclang *)",
+      "Bash(cmake *)",
+      "Bash(git add *)",
+      "Bash(git pull *)",
+      "Bash(pip install *)",
+      "Bash(npm install *)",
+      "Bash(package *)",
+      "Bash(chmod *)",
+      "Bash(chown *)",
+      "Read(./.env*)",
+      "Read(./*.pem)",
+      "Read(./*.key)"
+    ],
+    "ask": [
+      "Edit(./src/**)",
+      "Edit(./lib/**)",
+      "Edit(./include/**)",
+      "Edit(./config/**)",
+      "Edit(./.vscode/**)",
+      "Edit(./CMakeLists.txt)",
+      "Edit(./Makefile)",
+      "Edit(./cube/**)",
+      "Write(./src/**)",
+      "Write(./lib/**)",
+      "Write(./include/**)",
+      "Write(./config/**)",
+      "Bash(git commit *)",
+      "Bash(sudo *)",
+      "Bash(rm -rf *)",
+      "Bash(rm *)",
+      "Bash(curl *)",
+      "Bash(wget *)"
+    ],
+    "deny": [
+    ]
+  }
+}

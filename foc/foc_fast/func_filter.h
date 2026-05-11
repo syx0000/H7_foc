@@ -112,6 +112,7 @@ typedef struct {
   float   cur_v;
   int32_t old_pos_ref;           // 检测 position_ref 变化
   uint8_t active;                // 1: 斜坡进行中; 0: 已到位/未启动
+  uint16_t cooldown;             // snap 后冷却计数, >0 时不重启规划
 } PositionRefSmooth;
 #define DEFAULT_CURRENT_SMOOTH_FILTER {0}
 #define DEFAULT_POS_SMOOTH_FILTER {0}

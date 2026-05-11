@@ -29,7 +29,7 @@ typedef enum {
 
 typedef struct {
   int32_t  iq_step;            /* Q10 A, 默认 ±2*1024 = ±2 A */
-  int32_t  speed_threshold;    /* 载端内部值 (rpm × 1024 × 101), 默认 20 rpm */
+  int32_t  speed_threshold;    /* 载端内部值 (rpm × 1024 × 25), 默认 20 rpm */
   uint32_t settle_ms;          /* 反向后等暂态结束, 默认 100 ms */
   uint32_t accel_timeout_ms;   /* 单段加速到 speed_threshold 上限, 默认 1500 ms */
   uint32_t cycles;             /* 双向周期数, 默认 10 */

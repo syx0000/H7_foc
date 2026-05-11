@@ -44,7 +44,12 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
-
+	/* DWT时间戳变量定义 */
+  volatile uint32_t g_tim1_cc4_cycles = 0;
+  volatile uint32_t g_tim1_cc4_exit_cycles = 0;
+  volatile uint32_t g_tim1_enc_done_cycles = 0;
+  volatile uint32_t g_adc_isr_in_cycles = 0;
+  volatile uint32_t g_adc_isr_out_cycles = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -275,12 +280,18 @@ void DMA1_Stream4_IRQHandler(void)
 void ADC_IRQHandler(void)
 {
   /* USER CODE BEGIN ADC_IRQn 0 */
-
+	g_adc_isr_in_cycles = DWT_GetCycles();
+	uint32_t adc_isr_start = g_adc_isr_in_cycles;
   /* USER CODE END ADC_IRQn 0 */
   HAL_ADC_IRQHandler(&hadc1);
   HAL_ADC_IRQHandler(&hadc2);
   /* USER CODE BEGIN ADC_IRQn 1 */
-
+	g_adc_isr_out_cycles = DWT_GetCycles();
+	uint32_t elapsed = g_adc_isr_out_cycles - adc_isr_start;
+	g_adc_isr_cycles = elapsed;
+	if (elapsed > g_adc_isr_cycles_max) {
+		g_adc_isr_cycles_max = elapsed;
+	}
   /* USER CODE END ADC_IRQn 1 */
 }
 
@@ -299,26 +310,6 @@ void FDCAN1_IT0_IRQHandler(void)
 }
 
 /**
-  * @brief This function handles TIM1 update interrupt.
-  */
-void TIM1_UP_IRQHandler(void)
-{
-  /* USER CODE BEGIN TIM1_UP_IRQn 0 */
-	/* 记录UP中断进入时的CNT（线性） */
-	g_tim1_update_cnt = TIM1_GetLinearCnt();
-
-	HAL_GPIO_WritePin(LED_RUN_GPIO_Port,LED_RUN_Pin,GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(LED_RUN_GPIO_Port,LED_RUN_Pin,GPIO_PIN_SET);
-  /* USER CODE END TIM1_UP_IRQn 0 */
-  HAL_TIM_IRQHandler(&htim1);
-  /* USER CODE BEGIN TIM1_UP_IRQn 1 */
-	//isr_print("TIM1_UP_IRQHandler\r\n");
-	/* 记录UP中断退出时的CNT（线性） */
-	g_tim1_update_exit_cnt = TIM1_GetLinearCnt();
-  /* USER CODE END TIM1_UP_IRQn 1 */
-}
-
-/**
   * @brief This function handles TIM1 capture compare interrupt.
   */
 void TIM1_CC_IRQHandler(void)
@@ -326,8 +317,8 @@ void TIM1_CC_IRQHandler(void)
   /* USER CODE BEGIN TIM1_CC_IRQn 0 */
 	if (__HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_CC4) != RESET)
 	{
-		/* 记录CC4中断进入时的CNT（线性） */
-		g_tim1_cc4_cnt = TIM1_GetLinearCnt();
+		/* 记录CC4中断进入时的DWT周期 */
+		g_tim1_cc4_cycles = DWT_GetCycles();
 
 		HAL_GPIO_WritePin(LED_RUN_GPIO_Port,LED_RUN_Pin,GPIO_PIN_RESET);
 		HAL_GPIO_WritePin(LED_RUN_GPIO_Port,LED_RUN_Pin,GPIO_PIN_SET);
@@ -340,8 +331,8 @@ void TIM1_CC_IRQHandler(void)
   /* USER CODE END TIM1_CC_IRQn 0 */
   HAL_TIM_IRQHandler(&htim1);
   /* USER CODE BEGIN TIM1_CC_IRQn 1 */
-	/* 记录CC4中断退出时的CNT（线性） */
-	g_tim1_cc4_exit_cnt = TIM1_GetLinearCnt();
+	/* 记录CC4中断退出时的DWT周期 */
+	g_tim1_cc4_exit_cycles = DWT_GetCycles();
   /* USER CODE END TIM1_CC_IRQn 1 */
 }
 

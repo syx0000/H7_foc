@@ -23,9 +23,9 @@
 #define BOARD_MAX_TEM 95                         //
 #define BOARD_MIN_TEM 25
 #define BOARD_LIMIT_TEM 70
-#define MOTOR_MAX_SPEED 4136960                  // 40rpm
-#define MOTOR_LIMIT_SPEED 3102720                // 30rpm
-#define MOTOR_MIN_SPEED 25 * 1024 * 101          // 25rpm
+#define MOTOR_MAX_SPEED 1024000                  // 40rpm × 25 × 1024
+#define MOTOR_LIMIT_SPEED 768000                 // 30rpm × 25 × 1024
+#define MOTOR_MIN_SPEED 640000                   // 25rpm × 25 × 1024
 #define MOTOR_MAX_DEV_COE 10                     //
 #define MOTOR_MIN_DEV_COE 1                      //
 #define MOTOR_LIMIT_DEV_SPEED 2                  //

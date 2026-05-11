@@ -28,5 +28,9 @@ void TestSpeedLoopBandwidth(void);
 void TestFluxIdent(void);
 void TestInertiaIdent(void);
 void TestPositionLoopBandwidth(void);
+void TestMotorParamsIdent(void);
+void TestAutoTuneSpeed(void);
+void TestAutoTuneCurrent(void);
+void TestAutoTunePosition(void);
 
 #endif

@@ -50,11 +50,23 @@ int32_t get_actual_velocity(void) {
 }
 
 uint8_t set_velocity_ref(int32_t VelRef) {
-    return 0;
+    if (controller_eyou.ServoState.Bit.PdoRefreshing &&
+        (controller_eyou.controller_mode == PROFILE_VELOCITY_MOCE ||
+         controller_eyou.controller_mode == CYCLIC_SYNC_VELOCITY_MODE)) {
+        int32_t max = (int32_t)controller_eyou.FlashData.MaxSpeed;
+        if (VelRef >  max) VelRef =  max;
+        if (VelRef < -max) VelRef = -max;
+        controller_eyou.velocity_ref = VelRef;
+    }
+    return 1;
 }
 
 uint8_t set_velocity_ref_loop(int32_t VelRef) {
-    return 0;
+    int32_t max = (int32_t)controller_eyou.FlashData.MaxSpeed;
+    if (VelRef >  max) VelRef =  max;
+    if (VelRef < -max) VelRef = -max;
+    controller_eyou.velocity_ref = VelRef;
+    return 1;
 }
 
 int32_t get_velocity_ref(void) {
@@ -66,11 +78,23 @@ int32_t get_velocity_lim(void) {
 }
 
 int16_t set_torque_ref(int16_t TorRef) {
-    return 0;
+    if (controller_eyou.ServoState.Bit.PdoRefreshing &&
+        (controller_eyou.controller_mode == PROFILE_TORQUE_MODE ||
+         controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE)) {
+        int16_t max = (int16_t)controller_eyou.FlashData.MaxCurrent;
+        if (TorRef >  max) TorRef =  max;
+        if (TorRef < -max) TorRef = -max;
+        controller_eyou.I_q_ref = TorRef;
+    }
+    return 1;
 }
 
 int16_t set_torque_ref_loop(int16_t TorRef) {
-    return 0;
+    int16_t max = (int16_t)controller_eyou.FlashData.MaxCurrent;
+    if (TorRef >  max) TorRef =  max;
+    if (TorRef < -max) TorRef = -max;
+    controller_eyou.I_q_ref = TorRef;
+    return 1;
 }
 
 int16_t get_max_current(void) {
@@ -432,6 +456,54 @@ void measurePhaseInductanceAC(ControllerStruct* controller, float Rs) {
            Ld * 1000.0f, Z_d, INJ_FREQ_HZ, Rs);
     printf("Lq = %.4f mH  Z_q=%.4fOhm  (freq=%.0fHz Rs=%.4fOhm)\r\n",
            Lq * 1000.0f, Z_q, INJ_FREQ_HZ, Rs);
+
+    controller->ident_test.Ld = Ld;
+    controller->ident_test.Lq = Lq;
+}
+
+/* Flash 缓存的电机参数辨识: Flash Flag 有效则跳过, 无效则辨识并写回。
+ * 用 union 把 float 装进 Flash 的 int32_t 预留字段:
+ *   temp1=Rs, temp2=Ld, temp3=Lq, temp7=psi_f(磁链), temp8=J(惯量)
+ * MotorParamFlag == OFFEST_IS_CORRECTED_FLAG 表示 Rs/Ld/Lq 已落盘。 */
+void identifyMotorParamsCached(ControllerStruct* controller) {
+    union { float f; int32_t i; } u_rs, u_ld, u_lq, u_psi, u_j;
+
+    if (controller->FlashData.MotorParamFlag == OFFEST_IS_CORRECTED_FLAG) {
+        u_rs.i  = controller->FlashData.temp1;
+        u_ld.i  = controller->FlashData.temp2;
+        u_lq.i  = controller->FlashData.temp3;
+        controller->ident_test.Rs = u_rs.f;
+        controller->ident_test.Ld = u_ld.f;
+        controller->ident_test.Lq = u_lq.f;
+        printf("Motor params loaded from Flash: Rs=%.4f Ohm  Ld=%.4f mH  Lq=%.4f mH\r\n",
+               u_rs.f, u_ld.f * 1000.0f, u_lq.f * 1000.0f);
+
+        if (controller->FlashData.FluxIdentFlag == OFFEST_IS_CORRECTED_FLAG) {
+            u_psi.i = controller->FlashData.temp7;
+            controller->ident_test.flux_psi = u_psi.f;
+            printf("  psi_f=%.6f Wb\r\n", u_psi.f);
+        }
+        if (controller->FlashData.InertiaIdentFlag == OFFEST_IS_CORRECTED_FLAG) {
+            u_j.i = controller->FlashData.temp8;
+            printf("  J=%.3e kg*m^2\r\n", u_j.f);
+        }
+        return;
+    }
+
+    printf("MotorParamFlag invalid (0x%04X), running identification...\r\n",
+           (unsigned)controller->FlashData.MotorParamFlag);
+    float Rs = measurePhaseResistance(controller);
+    measurePhaseInductanceAC(controller, Rs);
+
+    u_rs.f = controller->ident_test.Rs;
+    u_ld.f = controller->ident_test.Ld;
+    u_lq.f = controller->ident_test.Lq;
+    controller->FlashData.temp1          = u_rs.i;
+    controller->FlashData.temp2          = u_ld.i;
+    controller->FlashData.temp3          = u_lq.i;
+    controller->FlashData.MotorParamFlag = OFFEST_IS_CORRECTED_FLAG;
+    WriteRunDataToFlash(controller, MOTORID0_RUN_DATA_ADDRESS);
+    printf("Rs/Ld/Lq saved to Flash\r\n");
 }
 
 void autoTuneCurrentLoopPI(float Rs, float Ld, float Lq) {
@@ -447,8 +519,8 @@ void autoTuneCurrentLoopPI(float Rs, float Ld, float Lq) {
     if (Ki < 1) Ki = 1;
     if (Ki > 200) Ki = 200;
 
-    set_current_loop_kp_ec(Kp);
-    set_current_loop_ki_ec(Ki);
+    // set_current_loop_kp_ec(Kp);
+    // set_current_loop_ki_ec(Ki);
 
     printf("AutoTune Current: BW=%dHz, Lq=%.3fmH, Rs=%.3fOhm -> Kp=%d, Ki=%d\r\n",
            CURRENT_LOOP_TARGET_BW_HZ, Lq * 1000.0f, Rs, Kp, Ki);
@@ -456,6 +528,14 @@ void autoTuneCurrentLoopPI(float Rs, float Ld, float Lq) {
 
 #define SPEED_LOOP_TARGET_BW_HZ    60
 #define SPEED_LOOP_ZERO_RATIO      8
+/* IMC 模型假设速度环被控对象为纯积分器 J/s, 电流环视为单位增益。
+ * 实测真实系统在目标带宽附近存在额外相位滞后:
+ *   - 电流环 1710Hz 在 60Hz 处贡献 ~2 度滞后
+ *   - 编码器速度滤波 (滑动均值 16 拍 @ 5kHz) 贡献 ~12 度滞后
+ *   - 减速箱反向间隙 + 机械刚度有限, 50Hz 附近可能有结构共振
+ * 直接用 IMC Kp (Kp=2600 实测) 会让谐振峰 +6dB, 需要按经验系数缩减。
+ * 0.6 系数由实测拟合: Kp=1500 Ki=10 对应峰值 1.8dB / 带宽 45Hz, 是合格区域。 */
+#define SPEED_LOOP_SAFETY_FACTOR   0.6f
 
 void autoTuneSpeedLoopPI(float J, float psi_f, uint8_t pp) {
     if (pp == 0 || psi_f <= 0.0f || J <= 0.0f) {
@@ -469,7 +549,8 @@ void autoTuneSpeedLoopPI(float J, float psi_f, uint8_t pp) {
     float omega_c  = 2.0f * M_PIf * (float)SPEED_LOOP_TARGET_BW_HZ;
     float omega_i  = omega_c / (float)SPEED_LOOP_ZERO_RATIO;
 
-    float Kp_w     = J * omega_c / Kt;
+    /* IMC 极零点对消 + 安全系数: 补偿实测系统多出的相位滞后 */
+    float Kp_w     = J * omega_c / Kt * SPEED_LOOP_SAFETY_FACTOR;
     float Ki_w     = Kp_w * omega_i;
 
     const float scale = 2.0f * M_PIf / 60.0f;
@@ -484,11 +565,59 @@ void autoTuneSpeedLoopPI(float J, float psi_f, uint8_t pp) {
     if (Ki < 1)     Ki = 1;
     if (Ki > 1000)  Ki = 1000;
 
-    set_speed_loop_kp_ec((int32_t)Kp);
-    set_speed_loop_ki_ec((int32_t)Ki);
+    // set_speed_loop_kp_ec((int32_t)Kp);
+    // set_speed_loop_ki_ec((int32_t)Ki);
 
-    printf("AutoTune Speed: BW=%dHz J=%.3e psif=%.6f Pp=%d -> Kp=%d Ki=%d\r\n",
+    printf("AutoTune Speed: BW=%dHz J=%.3e psif=%.6f Pp=%d -> Kp=%d Ki=%d (not applied)\r\n",
            SPEED_LOOP_TARGET_BW_HZ, J, psi_f, pp, Kp, Ki);
+}
+
+/* 位置环 PI 自整定
+ * 经验公式 (无被控对象模型, 完全基于带宽和采样周期):
+ *   位置环目标带宽 ω_c = 2π × POSITION_LOOP_TARGET_BW_HZ
+ *   Kp_pos = ω_c × PID_Div × SAFETY_FACTOR
+ *   Ki_pos = Kp_pos × (ω_c / ZERO_RATIO) × Ts_pos
+ *
+ * 设计经验:
+ *   - 位置环带宽 ≈ 速度环带宽 / 4 (避免内环未跟踪导致位置积分饱和)
+ *     当前速度环实测 BW ≈ 45Hz → 位置环目标 12Hz 较稳
+ *   - 位置环没有 PHU/motor_h7 的 autoTune 参考, 因为对机械非线性敏感:
+ *     减速箱反向间隙 + 负载摩擦 + 编码器分辨率限制
+ *   - SAFETY_FACTOR=0.4: 实测最佳值, 给出 Kp=3016 Ki=9, 带宽 25.6Hz, 谐振峰 0.58dB。
+ *     Kp > ~3500 后位置环输出 velocity_ref 过大, 速度环 I_q_ref 撞 MaxCurrent 限幅,
+ *     系统进入极限环振荡 (0.6/0.8 系数实测均发散)。带宽受机械系统硬限, 非控制器激进度。
+ *   - 零点比 10 比速度环 8 更保守, 避免低频隆起 */
+#define POSITION_LOOP_TARGET_BW_HZ   12
+#define POSITION_LOOP_ZERO_RATIO     10
+#define POSITION_LOOP_SAFETY_FACTOR  0.4f
+
+void autoTunePositionLoopPI(void) {
+    float fs_p    = (float)(FOC_FREQUENCY / POSITION_CALCULATE_DIV);  /* 2500Hz */
+    float Ts_p    = 1.0f / fs_p;
+    float omega_c = 2.0f * M_PIf * (float)POSITION_LOOP_TARGET_BW_HZ;
+    float omega_i = omega_c / (float)POSITION_LOOP_ZERO_RATIO;
+
+    float Kp_p    = omega_c * (float)DEFAULT_PID_POSITION_DIV * POSITION_LOOP_SAFETY_FACTOR;
+    float Ki_p    = Kp_p * omega_i * Ts_p;
+
+    uint32_t Kp = (uint32_t)(Kp_p + 0.5f);
+    uint32_t Ki = (uint32_t)(Ki_p + 0.5f);
+
+    if (Kp < 100)   Kp = 100;
+    if (Kp > 60000) Kp = 60000;
+    if (Ki < 1)     Ki = 1;
+    if (Ki > 10000) Ki = 10000;
+
+    // /* 同步写入 IncPID 运行结构和 FlashData (掉电保存) */
+    // controller_eyou.IncPID_Position.P = Kp;
+    // controller_eyou.IncPID_Position.I = Ki;
+    // controller_eyou.FlashData.Position_Kp = Kp;
+    // controller_eyou.FlashData.Position_Ki = Ki;
+
+    printf("AutoTune Position: BW=%dHz fs=%.0fHz Div=%d -> Kp=%u Ki=%u\r\n",
+           POSITION_LOOP_TARGET_BW_HZ, fs_p, DEFAULT_PID_POSITION_DIV,
+           (unsigned)Kp, (unsigned)Ki);
+    printf("  Hint: run pos bwtest to verify, tune manually if peak > 3dB\r\n");
 }
 
 uint32_t Set_Position_Limit(uint32_t Limit) {

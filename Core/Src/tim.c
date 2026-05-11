@@ -22,12 +22,11 @@
 
 /* USER CODE BEGIN 0 */
 
-/* 时间戳（以TIM1 CNT为基准，1计数=1/240MHz≈4.17ns，即240 counts = 1us） */
-volatile uint32_t g_tim1_cc4_cnt       = 0;  /* CC4中断进入时CNT */
-volatile uint32_t g_tim1_cc4_exit_cnt  = 0;  /* CC4中断退出时CNT */
-volatile uint32_t g_tim1_enc_done_cnt  = 0;  /* 编码器读取完成时CNT */
-volatile uint32_t g_tim1_update_cnt    = 0;  /* UP中断进入时CNT */
-volatile uint32_t g_tim1_update_exit_cnt = 0;/* UP中断退出时CNT */
+/* ADC注入中断时间戳（进：TIM1线性CNT；耗时：DWT周期数，1周期≈2.08ns @480MHz） */
+volatile uint32_t g_adc_isr_in_cnt     = 0;  /* ADC ISR进入时的TIM1线性CNT */
+volatile uint32_t g_adc_isr_out_cnt    = 0;  /* ADC ISR退出时的TIM1线性CNT */
+volatile uint32_t g_adc_isr_cycles     = 0;  /* 上一次ADC ISR耗时（DWT周期） */
+volatile uint32_t g_adc_isr_cycles_max = 0;  /* ADC ISR最大耗时 */
 
 /* USER CODE END 0 */
 
@@ -110,7 +109,7 @@ void MX_TIM1_Init(void)
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_TIMING;
-  sConfigOC.Pulse = 11999;
+  sConfigOC.Pulse = 9999;
   if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
     Error_Handler();
@@ -234,9 +233,7 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle)
     HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
     /* TIM1 interrupt Init */
-    HAL_NVIC_SetPriority(TIM1_UP_IRQn, 1, 0);
-    HAL_NVIC_EnableIRQ(TIM1_UP_IRQn);
-    HAL_NVIC_SetPriority(TIM1_CC_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(TIM1_CC_IRQn, 2, 0);
     HAL_NVIC_EnableIRQ(TIM1_CC_IRQn);
   /* USER CODE BEGIN TIM1_MspInit 1 */
 
@@ -323,7 +320,6 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* tim_baseHandle)
                           |GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_15);
 
     /* TIM1 interrupt Deinit */
-    HAL_NVIC_DisableIRQ(TIM1_UP_IRQn);
     HAL_NVIC_DisableIRQ(TIM1_CC_IRQn);
   /* USER CODE BEGIN TIM1_MspDeInit 1 */
 

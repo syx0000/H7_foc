@@ -179,12 +179,8 @@ int main(void)
 //	/* Rs 辨识前先对齐 d 轴，消除上电编码器位置不确定 */
 //	alignDAxis(&controller_eyou);
 
-	float Rs_measured = measurePhaseResistance(&controller_eyou);
-
-//	/* Ld/Lq 辨识前再次对齐 d 轴，消除 Rs 辨识期间转子可能的偏移 */
-//	alignDAxis(&controller_eyou);
-	measurePhaseInductanceAC(&controller_eyou, Rs_measured);
-	//autoTuneCurrentLoopPI(Rs_measured, controller_eyou.ident_test.Ld, controller_eyou.ident_test.Lq);
+	identifyMotorParamsCached(&controller_eyou);
+	//autoTuneCurrentLoopPI(controller_eyou.ident_test.Rs, controller_eyou.ident_test.Ld, controller_eyou.ident_test.Lq);
 
 	/* 7. 复位控制数据（清辨识期间积分器残留） */
 	ResetControlData(&controller_eyou);
@@ -272,12 +268,26 @@ int main(void)
 //		if (HAL_GetTick() - ts_tick >= 1000) {
 //			ts_tick = HAL_GetTick();
 
-//			/* 快照5个时间戳（TIM1 CNT单位，1us = 240 counts） */
-//			uint32_t t_cc4_in   = g_tim1_cc4_cnt;
-//			uint32_t t_cc4_out  = g_tim1_cc4_exit_cnt;
-//			uint32_t t_enc_done = g_tim1_enc_done_cnt;
-//			uint32_t t_up_in    = g_tim1_update_cnt;
-//			uint32_t t_up_out   = g_tim1_update_exit_cnt;
+//			/* 快照时间戳（DWT 周期计数, 480MHz, 1us = 480 ticks）
+//			 * 以 ADC ISR entry 为 0 时刻, 其他时间戳用有符号差值表示相对偏移
+//			 * (DWT 32bit ≈ 9s 回绕, 相对差值用 int32_t 处理回绕自动正确) */
+//			uint32_t t_cc4_in   = g_tim1_cc4_cycles;
+//			uint32_t t_cc4_out  = g_tim1_cc4_exit_cycles;
+//			uint32_t t_enc_done = g_tim1_enc_done_cycles;
+//			uint32_t t_adc_in   = g_adc_isr_in_cycles;
+//			uint32_t t_adc_out  = g_adc_isr_out_cycles;
+
+//			int32_t d_adc_out  = (int32_t)(t_adc_out  - t_adc_in) / 480;
+//			int32_t d_cc4_in   = (int32_t)(t_cc4_in   - t_adc_in) / 480;
+//			int32_t d_cc4_out  = (int32_t)(t_cc4_out  - t_adc_in) / 480;
+//			int32_t d_enc_done = (int32_t)(t_enc_done - t_adc_in) / 480;
+//			/* 编码器读取异步 (CC4 触发, 44us 后完成), 抓到的可能是上一周期的完成时刻。
+//			 * 若为负数表示"上一周期完成", 加 100us (一个 ADC 周期) 换算到"上一周期 ADC entry 起算"。 */
+//			if (d_enc_done < 0) d_enc_done += 100;
+
+//			uint32_t adc_us_last = g_adc_isr_cycles / 480;
+//			uint32_t adc_us_max  = g_adc_isr_cycles_max / 480;
+//			g_adc_isr_cycles_max = 0;
 
 //			uint32_t trig, succ, skip, last_us, min_us, max_us;
 //			DPT_GetAndResetStats(&trig, &succ, &skip, &last_us, &min_us, &max_us);
@@ -285,17 +295,14 @@ int main(void)
 //			DPT_Angles angles;
 //			DPT_GetLatestAngles(&angles);
 
-//			printf("Inner:%.2f Outer:%.2f Sta:0x%02X | Trig:%luHz Succ:%lu Skip:%lu | "
-//			       "T(us):last=%lu min=%lu max=%lu | "
-//			       "Timing(us): CC4_in=%lu.%lu CC4_out=%lu.%lu Enc_done=%lu.%lu UP_in=%lu.%lu UP_out=%lu.%lu\r\n",
-//				angles.inner_deg, angles.outer_deg, angles.status,
-//				trig, succ, skip,
-//				last_us, min_us, max_us,
-//				t_cc4_in/240,   (t_cc4_in%240)*10/240,
-//				t_cc4_out/240,  (t_cc4_out%240)*10/240,
-//				t_enc_done/240, (t_enc_done%240)*10/240,
-//				t_up_in/240,    (t_up_in%240)*10/240,
-//				t_up_out/240,   (t_up_out%240)*10/240);
+//			printf("Inner:%.2f Outer:%.2f Sta:0x%02X | Trig:%luHz Succ:%lu Skip:%lu | Enc(us):last=%lu min=%lu max=%lu\r\n",
+//							angles.inner_deg, angles.outer_deg, angles.status,
+//							trig, succ, skip,
+//							last_us, min_us, max_us);
+//			printf("  T0=ADC_entry | ADC_exit=%+ldus CC4_in=%+ldus CC4_out=%+ldus Enc_done=%+ldus\r\n",
+//							(long)d_adc_out, (long)d_cc4_in, (long)d_cc4_out, (long)d_enc_done);
+//			printf("  ADC ISR duration: last=%luus max(1s)=%luus\r\n",
+//							adc_us_last, adc_us_max);
 //		}
 
 //		/* ADC注入采样检测（TIM1 TRGO=10kHz，中央对齐每个完整周期触发1次） */

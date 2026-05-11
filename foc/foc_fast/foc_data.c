@@ -16,6 +16,7 @@
 #include "func_subprogram.h"
 #include "func_pid.h"
 #include "foc_controller.h"
+#include "foc_api.h"
 #include "flash_port.h"
 #include "encoder.h"
 #include <stdio.h>
@@ -104,6 +105,10 @@ uint8_t InitFlashData(ControllerStruct* controller) {
         controller->FlashData.ArrivedFlag     = 0xFFFF;
         controller->FlashData.RunDataFlag     = 0xFFFF;
         controller->FlashData.ProteckKeyFlag  = 0xFFFF;
+        controller->FlashData.MotorParamFlag  = 0xFFFF;
+        controller->FlashData.FluxIdentFlag   = 0xFFFF;
+        controller->FlashData.InertiaIdentFlag = 0xFFFF;
+        InitReservedFields(&controller->FlashData);
         Temp = 0xFF;
     }
 
@@ -251,7 +256,6 @@ uint8_t DefualtPidValue(FlashSavedData* FlashData) {
     FlashData->Current_Ki       = INC_PID_CURRENT_KI;
     FlashData->Current_Kd       = INC_PID_CURRENT_KD;
     FlashData->Pid_CurrentLimit = INC_PID_CURRENT_LIMIT;
-    InitReservedFields(FlashData);
     return 0;
 }
 
@@ -294,7 +298,7 @@ uint8_t FlashLimit_Check(Portection_Value* Threshold_buffer) {
 
 void ElecAngleEstimate(ControllerStruct* controller) {
     uint16_t theta_open[4]   = {0, 16383, 32767, 49151};  // 0° 90° 180° 270°
-    int16_t v_d              = 1024;                      // 2V d轴电压（提高驱动力）
+    int16_t v_d              = 2048;                      // 2V d轴电压（提高驱动力）
     int16_t v_q              = 0;
     uint32_t TempPosition[4] = {0};
     int16_t i;

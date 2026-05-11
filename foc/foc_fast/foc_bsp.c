@@ -168,6 +168,22 @@ void dbg_cmd_set(void) {
         printf("bwtest:%d\r\n", which);
         if (which == 1) {
             TestCurrentLoopBandwidth();
+        } else if (which == 2) {
+            TestSpeedLoopBandwidth();
+        } else if (which == 3) {
+            TestMotorParamsIdent();
+        } else if (which == 4) {
+            TestFluxIdent();
+        } else if (which == 5) {
+            TestInertiaIdent();
+        } else if (which == 6) {
+            TestAutoTuneCurrent();
+        } else if (which == 7) {
+            TestAutoTuneSpeed();
+        } else if (which == 8) {
+            TestAutoTunePosition();
+        } else if (which == 9) {
+            TestPositionLoopBandwidth();
         }
     }
 
@@ -326,7 +342,7 @@ void dbg_cmd_set(void) {
             controller_eyou.velocity_ref = 0;
         } else if (controller_eyou.controller_mode == PROFILE_VELOCITY_MOCE ||
                    controller_eyou.controller_mode == CYCLIC_SYNC_VELOCITY_MODE) {
-            controller_eyou.velocity_ref = Data * 1024 * 101;
+            controller_eyou.velocity_ref = Data * 1024 * 25;
         } else if (controller_eyou.controller_mode == PROFILE_POSITION_MODE ||
                    controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE) {
             controller_eyou.position_ref = Data * 1024;

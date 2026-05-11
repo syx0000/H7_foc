@@ -101,8 +101,8 @@ extern can_wly_limits_t g_can_wly_lim;
  *   motor_h7: KT_OUT = Kt * GR. 这里暂以 1.0 估算, 标定后通过 SDO 修改 */
 extern float g_can_wly_kt_out;
 
-/* 减速比 (用于 rpm/rad-s 换算. 对齐 motor_h7: GR=50 对应 CLAUDE.md) */
-#define CAN_WLY_GR          50.0f
+/* 减速比 (用于 rpm/rad-s 换算. 对齐 motor_h7: GR=25 对应 CLAUDE.md) */
+#define CAN_WLY_GR          25.0f
 
 #ifdef __cplusplus
 }

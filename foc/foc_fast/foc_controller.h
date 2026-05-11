@@ -48,9 +48,9 @@ extern volatile uint8_t USART_CONTROL;
 
 /*死区补偿功能配置*/
 #define USE_DEADTIME_COMPENSATION 0     // 死区补偿使能开关：1开启，0关闭
-#define DEADTIME_TICKS 50               // 死区时间（时钟周期数）
+#define DEADTIME_TICKS 50               // 死区时间（时钟周期数，保留兼容，实际死区由DRV8353RH内部100ns主导）
 #define PWM_CLOCK_HZ 200000000          // PWM时钟频率 200MHz
-#define DEADTIME_COMP_VOLTAGE 246       // 死区补偿电压 Q10格式 (0.24V * 1024)
+#define DEADTIME_COMP_VOLTAGE 49        // 死区补偿电压 Q10格式 (~0.048V * 1024，按48V/100ns/10kHz估算)
 #define DEADTIME_CURRENT_THRESHOLD 512  // 电流过零区阈值 Q10格式 (0.5A * 1024)
 
 /*保护功能开关*/
@@ -86,7 +86,7 @@ extern volatile uint8_t USART_CONTROL;
 #define FLASH_DATA_IS_UPDATA_FLAG 60
 #define ELEC_ANGLE_ESTIMATE_FAILED 70                          // 上一次电角度辨识失败
 #define MECH_OFFSET_ANGLE_IS_UPDATA_FLAG ((uint16_t)0x0064)    // 用户定义零点
-#define FLASH_STRUCT_VERSION 2                                 // FlashSavedData 结构体版本（uint32_t PID）
+#define FLASH_STRUCT_VERSION 3                                 // FlashSavedData 结构体版本（增加 MotorParamFlag）
 
 #define LOCKED_MOTOR_CURRENT (15 * 1024)                       // 10A
 #define DE_LOCKED_CURRENT (LOCKED_MOTOR_CURRENT / 6)
@@ -122,7 +122,7 @@ extern volatile uint8_t USART_CONTROL;
 extern uint32_t MAX_CURRENT_PRE;
 #define DEFAULT_MAX_CURRENT (25 * 1024)    // 120w/48v*38nm/14nm /sqrtf(3)*2 = 7.85A
 
-// #define DEFAULT_MAX_SPEED                       (30 * 101*1024)   //30rpm
+// #define DEFAULT_MAX_SPEED                       (30 * 25*1024)   //30rpm
 extern uint32_t DEFAULT_MAX_SPEED;
 
 // #define DEFAULT_MAX_SPEED_LOAD                  (30*1024)
@@ -223,7 +223,7 @@ typedef struct {
   float    freq_start;          // 起始频率 (Hz)
   float    freq_end;            // 结束频率 (Hz)
   uint8_t  points_per_decade;   // 每十倍频程点数
-  float    amplitude_base;      // 低频段恒定注入幅值 (内部速度单位, 1rpm = 1024*101)
+  float    amplitude_base;      // 低频段恒定注入幅值 (内部速度单位, 1rpm = 1024*25)
   float    f_break;             // 拐点频率 (Hz), f>f_break 后注入幅值按 f_break/f 衰减
   int32_t  current_amplitude;   // 当前频点实际注入幅值, 切频时按 amp_base*f_break/f 重算
 
@@ -349,8 +349,8 @@ typedef struct {
 #define MOTOR_LOCKED_FAULT 0x00000020                  // 错误标志位,堵转 6
 // #define MOTOR_POS_OFFSET_VALUE            2048//1degree
 // #define MOTOR_POS_OFFSET_COUNT            3
-#define MOTOR_SPEED_OFFSET_VALUE 10240    // 10rpm  10*101*1024
-#define MOTOR_SPEED_OVER_VALUE 3102720    // 30rpm
+#define MOTOR_SPEED_OFFSET_VALUE 10240    // 10rpm × 1024 (电机端 Q10, dtheta_mech 单位)
+#define MOTOR_SPEED_OVER_VALUE 768000     // 30rpm × 25 × 1024 (载端 Q10, velocity_ref 单位)
 #define MOTOR_SPEED_OFFSET_COUNT 2048
 typedef union {
   uint32_t All_Flag;
@@ -433,8 +433,12 @@ typedef struct {
   uint16_t brake_time;              // 抱闸延时时间
   __IO int32_t mech_offest_out;     // 输出端偏移值
   uint32_t stoStateFlag;            // STO标志位，0-sto不启用，1-stoa启用，2-stob启用，3-stoab启用
-  int32_t temp7;               // 预留成员7
-  int32_t temp8;               // 预留成员8
+  uint16_t MotorParamFlag;          // 电机参数有效标志: 00||FF为无，其余为有（用 OFFEST_IS_CORRECTED_FLAG）
+  uint16_t FluxIdentFlag;           // 磁链辨识有效标志
+  uint16_t InertiaIdentFlag;        // 惯量辨识有效标志
+  uint16_t MotorParamReserved;      // 对齐占位
+  int32_t temp7;               // 预留成员7 (用于 psi_f)
+  int32_t temp8;               // 预留成员8 (用于 J)
 
   uint32_t Crc;                      // Crc校验位
 } FlashSavedData;

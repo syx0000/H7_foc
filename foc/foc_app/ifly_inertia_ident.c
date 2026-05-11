@@ -17,7 +17,7 @@
  *   单位约定 (与项目内现有变量一致):
  *     I_q                : Q10 A   (1024 = 1 A)
  *     dtheta_mech        : 电机端 rpm × 1024
- *     speed_threshold    : 载端 rpm × 1024 × 101 (内部含减速比 101)
+ *     speed_threshold    : 载端 rpm × 1024 × 25 (内部含减速比 25)
  *
  *   ω_m [rad/s] = (dtheta_mech / 1024) * (2π/60)   (机械角速度,不乘 NPP)
  *   Te [N·m]   = 1.5 * NPP * (psi_f * Iq + (Ld - Lq) * Id * Iq)
@@ -38,7 +38,7 @@ extern ifly_Err_Pro_Type motorProValue;
  * 与对称双向法不同, coast-down 不需要靠 Iq 大小压低 Tf/Te 偏置 (摩擦项已被
  * 差分消掉), 只需保证起动力矩压过静摩擦/抱闸残余即可。 */
 #define DEFAULT_IQ_STEP_Q10        (1024+360)                              /* 1.35 A */
-#define DEFAULT_SPEED_TH_INTERNAL  ((int32_t)(20.0f * 1024.0f * 101.0f))   /* 载端 20 rpm */
+#define DEFAULT_SPEED_TH_INTERNAL  ((int32_t)(20.0f * 1024.0f * 25.0f))    /* 载端 20 rpm */
 #define DEFAULT_SETTLE_MS          (100u)
 #define DEFAULT_ACCEL_TIMEOUT_MS   (5000u)
 #define DEFAULT_CYCLES             (10u)

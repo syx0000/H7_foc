@@ -124,11 +124,11 @@ void DPT_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     }
 
     if (g_async_mode) {
-        /* 记录编码器读取完成时的TIM1计数值（线性） */
-        g_tim1_enc_done_cnt = TIM1_GetLinearCnt();
+        /* 记录编码器读取完成时的DWT周期 */
+        g_tim1_enc_done_cycles = DWT_GetCycles();
 
         /* 计算本次触发到完成的耗时 */
-        uint32_t elapsed_us = DWT_CyclesToUs(DWT_GetCycles() - g_trigger_start_cycles);
+        uint32_t elapsed_us = DWT_CyclesToUs(g_tim1_enc_done_cycles - g_trigger_start_cycles);
         g_last_elapsed_us = elapsed_us;
         if (elapsed_us > g_max_elapsed_us) g_max_elapsed_us = elapsed_us;
         if (elapsed_us < g_min_elapsed_us) g_min_elapsed_us = elapsed_us;

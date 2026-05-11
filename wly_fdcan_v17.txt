@@ -1,0 +1,438 @@
+                 FDCAN
+
+                                       
+2025-07-04 V1.0           
+2025-07-11 V1.1           1
+                          2
+2025-09-02 V1.2           1
+                          
+2025-09-19 V1.3           2
+2025-10-20 V1.4           
+2025-11-20 V1.5           1      0x2000 
+                          0x2001       
+2025-12-04 V1.6           float32
+                          20x80+ID
+2025-12-17 V1.7           
+                          1
+                          
+                          1MIT
+                          2fdcanID
+                          3
+                          1VEL,TQ,KP,KD
+                          16
+                          2
+                          1ERR16
+                          2ERR
+                          WARN
+                          3STABit2
+                          
+                          1
+                          
+
+                    1
+                                                   
+
+1.1  ...................................................... 3
+1.2  .............................................. 4
+1.3  ............................................ 5
+1.4  ............................................ 5
+1.5  ............................................ 5
+1.6 MIT ............................................. 6
+1.7  .................................................. 7
+
+      1.7.1  .............................................. 7
+      1.7.2  .............................................. 7
+      1.7.3  .......................................... 7
+      1.7.4  .............................................. 7
+1.8  ................................................ 7
+      1.8.1 ......................................... 7
+      1.8.2  .................................... 7
+      1.8.3  ........................................ 7
+      1.8.4  .................................... 7
+1.9 ....................................................... 8
+
+                                                                 2
+          FDCAN
+           (11)CANFD-
+           
+           1M80%5M80%
+           
+
+               Bit6-bit0CANIDID
+
+               Bit10-bit70x800x1000x200
+
+         
+    
+    1Byte
+
+         
+
+          1.1 
+
+         
+    
+
+ID  D[0]  D[1]        D[2]  D[3]  D[4] D[5] D[6] D[7]  D[8]  D[9] D[10] D[11]
+
+CANID+
+            POS[7:0] POS[15:8] POS[23:16] VEL[7:0] VEL[15:8] T[7:0] T[15:8] ERR1[7:0] ERR1[15:8] ERR2[7:0] WARN[7:0] STA
+
+0x100
+
+          D[0]~D[11]0~11
+
+    ERR1
+
+                                           1
+
+                Bit0                                   
+
+                Bit1                                   
+
+                Bit2                                   MOS
+
+                Bit3                       
+                Bit4              disable     
+                Bit5                                
+
+                Bit6                                   
+
+                Bit7                                   
+
+          Bit8...Bit15                                 
+
+    ERR2 Bit
+
+              Bit0                                     
+              Bit1                                        
+              Bit2                                        
+          Bit3...Bit7            enable                   
+
+    WARN Bit
+
+              Bit0                            MOS
+              Bit1                         
+          Bit2...Bit7
+                                                    
+
+                                    3
+STA
+
+         
+
+Bit0  01
+
+Bit1  0:1
+
+Bit2  0:1
+
+Bit3     
+
+Bit4     
+
+Bit5     
+
+Bit6     
+
+Bit7     
+
+     POS[23:0]
+     VEL[15:0]
+     T[15:0]
+     
+2416
+     
+      25rad/s
+      -30rad/s~30rad/sSpdMin
+
+          SpdMax
+      
+
+          VEL=(25-(-30))/(30-(-30))*(2^16-1) = 60074 = 0xEAAA
+     f(a) = (a - min)/(max - min) * (2^n(a) - 1);
+     
+
+1.2 
+
+
+     
+                                            ID
+                                            0x80
+     
+
+     
+                                            ID
+                                           CANID
+                                           +0x80
+
+     CANID
+
+      4
+       1.3 
+
+       
+
+ID     D[0]  D[1]  D[2]  D[3]        D[4]   D[5]
+
+0x200 V_des[7:0]] V_des[15:8] CANID1 V_des[7:0]] V_des[15:8] CANID2
+
+             1                       2                               ...
+
+        
+            FDCAN64
+            321
+
+       21
+        3
+
+            V_des[15:0]: 1.1
+            CANID : ID
+
+       1.4 
+
+       
+
+ID     D[0]  D[1]  D[2]  D[3]        D[4]   D[5]
+
+0x300 T_des[7:0] T_des[15:8] CANID1 T_des[7:0] T_des[15:8] CANID2
+
+             1                       2                               ...
+
+        
+            FDCAN64
+            321
+
+       21
+        3
+
+            T_des[15:0]: 1.1
+            CANID : ID
+
+       1.5 
+
+       
+
+ID     D[0]  D[1]  D[2]        D[3]  D[4]   D[5]                     1
+0x400
+       POS[7:0] POS[15:8] POS[23:16] V_des[7:0] V_des[15:8] CANID1
+
+       D[6]  D[7]  D[7]        D[9]  D[10]  D[11]                    2
+
+       POS[7:0] POS[15:8] POS[23:16] V_des[7:0] V_des[15:8] CANID2
+
+                         ....                                        ....
+
+        
+            FDCAN64
+            610
+
+       10
+        6
+
+                               5
+         P_des[23:0]:1.1;
+         V_des[15:0]:1.1
+         CANID : ID
+
+         1.6 MIT
+
+         
+
+ID D[0]  D[1]       D[2]   D[3]  D[4] D[5] D[6] D[7] D[8] D[9] D[10] D[11]
+
+       POS[7:0] POS[15:8] POS[23:16] VEL[7:0] VEL[15:8] T[7:0] T[15:8] Kp[7:0] Kp[15:8] Kd[7:0] Kd[15:8] CANID1  1
+                                                                                                                 2
+       D[12] D[13]  D[14]  D[15] D[16] D[17] D[18] D[19] D[20] D[21] D[22] D[23]
+                                                                                                                   ....
+0x500
+
+       POS[7:0] POS[15:8] POS[23:16] VEL[7:0] VEL[15:8] T[7:0] T[15:8] Kp[7:0] Kp[15:8] Kd[7:0] Kd[15:8] CANID2
+
+                                 ....
+
+          
+              FDCAN64
+              MIT125
+
+         5
+          12
+
+              POS
+              VEL
+              Kp
+              Kd
+              T
+              CANID : ID
+              POSVELKpKdT511
+         POS24VELKpKdT16
+              1.1
+         
+              POSVELKpKdT
+              
+
+         MIT
+         TqCmd = Kp*(Pos_des­Pos_cur)+ Kd*(Vel_des­Vel_cur) + Tff
+         
+         TqCmdN·m,MIT
+         Pos_desrad
+         Pos_currad
+         KpN·m / rad
+         Velrad/s
+         Vel_currad/s
+         KdN·m·s / rad
+         TffN·m
+
+                                       6
+             1.7 
+
+             
+
+    
+
+             1.7.1 
+
+             ""
+
+             ID      D[0] D[1] D[2] D[3] D[4] D[5] D[6] D[7]
+
+             CANID+0x700 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFA
+
+             1.7.2 
+
+             ""
+
+             ID      D[0] D[1] D[2] D[3] D[4] D[5] D[6] D[7]
+
+             CANID+0x700 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFB
+
+             1.7.3 
+
+             ""
+
+             ID      D[0] D[1] D[2] D[3] D[4] D[5] D[6] D[7]
+
+             CANID+0x700 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFC
+
+             1.7.4 
+
+             "", 
+
+    
+
+             ID      D[0] D[1] D[2] D[3] D[4] D[5] D[6] D[7]
+
+             CANID+0x700 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFD
+
+             1.8 
+
+             1.8.1
+
+             ID      D[0] D[1] D[2] D[3] D[4] D[5] D[6] D[7]
+
+             CANID+0x600 0x40   0x00 0x00 0x00 0x00
+
+             1.8.2 
+
+             
+
+     ID      D[0] D[1] D[2] D[3]   D[4]  D[5]        D[6]              D[7]
+CANID+0x580                                                       Data[31:24]
+             0x60   Data[7:0] Data[15:8] Data[23:16]
+
+             
+
+                 ID  D[0] D[1] D[2] D[3] D[4] D[5] D[6] D[7]
+
+             CANID+0x580 0x80 ERR 0x00 0x00 0x00 0x00 0x00 0x00
+
+             1.8.3 
+
+ID           D[0] D[1] D[2]  D[3]  D[4]      D[5]    D[6]         D[7]
+                                         Data[15:8]
+CANID+0x600 0x23   Data[7:0]                         Data[23:16] Data[31:24]
+                                             D[5]
+             1.8.4                       Data[15:8]
+             
+
+ID           D[0] D[1] D[2]  D[3]  D[4]              D[6]         D[7]
+
+CANID+0x580 0x60   Data[7:0]                         Data[23:16] Data[31:24]
+
+                                   7
+
+
+           ID      D[0] D[1] D[2] D[3] D[4] D[5] D[6] D[7]
+
+        CANID+0x580 0x80 ERR 0x00 0x00 0x00 0x00 0x00 0x00
+
+1.9
+
+                                                                                             
+                   Float32       4                                         rad
+PosMin     0x2000  Float32       4                                         -5
+                   Float32       4                                         rad
+PosMax     0x2001  Float32       4                                         5
+                   Float32       4                                         rad/s
+SpdMin     0x2002  Float32       4                                         -20
+                   Float32       4                                         rad/s
+SpdMax     0x2003  Float32       4                                         20
+                   Float32       4                                         N·m
+TqMin      0x2004  Float32       4                                         -500
+                                                                           N·m
+TqMax      0x2005   Uint16       2                                         500
+                   Float32       4                                         KpN·m / rad
+KpMin      0x2006  Float32       4                                         0
+                   Float32       4                                         KpN·m / rad
+KpMax      0x2007                                                          500
+                                                                           KpNm·s / rad
+KdMin      0x2008                                                          0
+                                                                           KpNm·s / rad
+KdMax      0x2009                                                          20
+                                                                           HZ1000HZ
+SyncCycle  0x200A                                                          
+                                                                           IP
+DriPosKp   0x200B                                                          KP
+DriSpdKp   0x200C                                                          KP
+DriSpdKi   0x200D                                                          Ki
+
+
+
+
+
+PosMin = -5; PosMax = 5;
+SpdMin = -20; SpdMin = 20;
+
+                                                                        8
+TqMin = -500; TqMin = 500;
+KpMin = 0; KpMin = 500;
+KdMin = 0; KdMin = 20;
+
+MIT 
+
+
+ pos = 0 spd = 0 tq = 0 Kp = 0 Kd = 0
+ CANID = 1 CANID = 2 
+
+MIT 
+
+ ID       
+
+0x500 : 00 00 80 00 80 00 80 00 00 00 00 01 00 00 80 00 80 00 80 00 00
+
+00 00 02
+
+
+ pos = 1 spd = 1 tq = 1 Kp = 1 Kd = 1
+ CANID = 1 CANID = 2 
+
+MIT 
+
+ ID       
+
+0x500 : 99 99 99 66 86 41 80 83 00 CC 0C 01 99 99 99 66 86 41 80 83 00
+
+CC 0C 02
+
+                            9
+
