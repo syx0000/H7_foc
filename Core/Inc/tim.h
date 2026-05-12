@@ -69,6 +69,20 @@ extern volatile uint32_t g_adc_isr_out_cycles;      /* ADC ISR退出时DWT周期
 extern volatile uint32_t g_adc_isr_cycles;      /* 上一次ADC ISR耗时（DWT周期，480MHz） */
 extern volatile uint32_t g_adc_isr_cycles_max;  /* ADC ISR最大耗时 */
 
+/* ADC ISR 分段耗时（DWT 周期）
+ * 分段: read=电流raw读取 / enc=编码器电角度+位置 / pos=位置环 / vel=速度环 / cur=电流环+SVPWM
+ * pos/vel 只在实际运行的那一拍更新（受 POSITION_CALCULATE_DIV / VELOCETY_CALCULATE_DIV 分频） */
+extern volatile uint32_t g_adc_isr_t_read;      /* 电流raw读取段耗时 */
+extern volatile uint32_t g_adc_isr_t_enc;       /* 编码器计算段耗时 */
+extern volatile uint32_t g_adc_isr_t_pos;       /* 位置环耗时（上次运行） */
+extern volatile uint32_t g_adc_isr_t_vel;       /* 速度环耗时（上次运行） */
+extern volatile uint32_t g_adc_isr_t_cur;       /* 电流环+SVPWM耗时 */
+extern volatile uint32_t g_adc_isr_t_read_max;
+extern volatile uint32_t g_adc_isr_t_enc_max;
+extern volatile uint32_t g_adc_isr_t_pos_max;
+extern volatile uint32_t g_adc_isr_t_vel_max;
+extern volatile uint32_t g_adc_isr_t_cur_max;
+
 /* 读取TIM1线性计数值：
  * 中央对齐模式下CNT先升后降，这里转换成0~23999的连续计数 */
 static inline uint32_t TIM1_GetLinearCnt(void)

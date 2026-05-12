@@ -214,7 +214,198 @@ int main(void)
 
 ---
 
-## 七、参考
+## 七、分阶段实施计划
+
+### 阶段 1：低风险高收益（纯代码改动）
+
+| # | 动作 | 改动位置 | 预期收益 | 风险 |
+|---|------|---------|---------|------|
+| 1 | `main.c` 加 `SCB_EnableICache()`（仅 ICache） | `Core/Src/main.c` USER CODE BEGIN 1 | **-20us** | 零风险（ICache 无 DMA 一致性问题） |
+| 2 | Keil 勾选 Optimize for Time | `Options for Target → C/C++` | **-8us** | 零风险 |
+| 3 | `weak_magn_control` 加 `#if USE_WEAK_MAGN` | `foc_current_loop.c:101` | **-5us** | 零风险（本就是空转代码） |
+
+**阶段 1 预期：ISR 43us → 10~15us**
+
+### 阶段 2：开启 DCache（需要 MPU 配合，见第八节）
+
+| # | 动作 | 改动位置 | 预期收益 | 风险 |
+|---|------|---------|---------|------|
+| 4 | CubeMX 配置 MPU Region 1 为非 Cacheable | CubeMX → CORTEX_M7 → MPU Settings | - | 配置错会 HardFault |
+| 5 | DMA 缓冲区加 `__attribute__((section(".dma_buffer")))` | adc.c / encoder.c | - | 需改 scatter 文件加段 |
+| 6 | `main.c` 加 `SCB_EnableDCache()` | main.c | **-3~5us** | 需先完成 4/5 |
+| 7 | `check_phases_overcurrent_timesliced` 下放到 1kHz 慢环 | `foc_current_loop.c:391~442` | **max -10us** | 需确认过流保护时序 |
+
+**阶段 2 预期：ISR 稳定 8~10us，max 抖动大幅降低**
+
+### 阶段 3：ITCM/DTCM 热代码放置（需改链接脚本）
+
+| # | 动作 | 改动位置 | 预期收益 | 风险 |
+|---|------|---------|---------|------|
+| 8 | 修改 `.sct` scatter 文件，加 ITCM/DTCM 段 | `MDK-ARM/cubemx_yxsui/cubemx_yxsui.sct` | - | 链接脚本改错会无法启动 |
+| 9 | `ATTR_RAMFUNC` 宏定义为段属性，sin 表和 FOC kernel 加宏 | `foc_bsp.h` + 各 foc 热函数 | **抖动消除** | 需验证启动流程 |
+| 10 | PID 函数指针改直接调用 `IncPIDCal` | `foc_current_loop.c:91,97` | **-1us** | 零风险 |
+| 11 | `svpwm_calc` 预算 `PWM_T/UDC` 系数 + 常量除法改位移 | `foc_kernel.c:127~237` | **-3us** | 需对比波形 |
+
+**阶段 3 预期：ISR 5~8us，无抖动**
+
+---
+
+## 八、方案 A 详细设计：MPU 配置非 Cacheable 区 + DMA 缓冲区重定位
+
+### 8.1 背景
+
+开启 DCache 后，CPU 通过 Cache 访问 SRAM，而 DMA 外设直接访问 SRAM 物理内存。两者不同步会导致：
+
+- **DMA → CPU**（ADC/编码器）：DMA 把新数据写进 SRAM，CPU 从 Cache 读到旧值
+- **CPU → DMA**（USART TX）：CPU 写进 Cache 但未回写 SRAM，DMA 读到旧值
+
+### 8.2 涉及的 DMA 缓冲区清单
+
+| 缓冲 | 文件位置 | 方向 | 当前所在内存 |
+|------|---------|------|-------------|
+| `adc_reg_buffer[2]` | `Core/Src/adc.c:38` | DMA → CPU | AXI SRAM (默认 `.bss`) |
+| DPT 编码器 RX 缓冲 | `Core/Src/encoder.c` | DMA → CPU | AXI SRAM |
+| DPT 编码器 TX 缓冲 | `Core/Src/encoder.c` | CPU → DMA | AXI SRAM |
+| USART1 TX 缓冲（printf） | `Core/Src/usart.c` | CPU → DMA | AXI SRAM |
+| USART1 RX 缓冲（调试命令） | `Core/Src/usart.c` | DMA → CPU | AXI SRAM |
+
+### 8.3 内存布局设计
+
+STM32H743 有多块 SRAM：
+- **D1 AXI SRAM** `0x24000000` 512KB — 默认 `.bss/.data`
+- **D2 SRAM1** `0x30000000` 128KB — 适合做 DMA 缓冲（与 D2 外设同域）
+- **D2 SRAM2** `0x30020000` 128KB
+- **D2 SRAM3** `0x30040000` 32KB
+- **D3 SRAM4** `0x38000000` 64KB — 低功耗域，BDMA 用
+
+**选 D2 SRAM1 `0x30000000` 作为 DMA 专用区**，原因：
+- ADC/USART/DMA1/DMA2 都在 D2 域，总线路径短
+- 独立于主 AXI SRAM，不影响正常变量
+- 128KB 足够
+
+### 8.4 MPU Region 1 配置（CubeMX）
+
+在 CubeMX → CORTEX_M7 → MPU Settings 中：
+
+```
+Cortex Memory Protection Unit Region 1 Settings:
+  MPU Region:              Enabled
+  MPU Region Base Address: 0x30000000
+  MPU Region Size:         32KB (够用即可，16~64KB 均可)
+  MPU SubRegion Disable:   0x0
+  MPU TEX field level:     level 1
+  MPU Access Permission:   FULL ACCESS
+  MPU Instruction Access:  DISABLE
+  MPU Shareability Permission: ENABLE
+  MPU Cacheable Permission:    DISABLE   ← 关键
+  MPU Bufferable Permission:   ENABLE
+```
+
+**关键字段解释**：
+- `TEX=1, C=0, B=1, S=1` → Normal memory, Non-cacheable, Shareable（ARM MPU 标准配置）
+- `Shareable=ENABLE` 保证多总线主（CPU+DMA）看到一致顺序
+- `Cacheable=DISABLE` → 绕开 DCache
+
+### 8.5 链接脚本（scatter）修改
+
+`MDK-ARM/cubemx_yxsui/cubemx_yxsui.sct` 当前可能只有默认段，需加 D2 SRAM 段：
+
+```scatter
+; 原有部分保持不变
+LR_IROM1 0x08000000 0x00200000  {
+  ER_IROM1 0x08000000 0x00200000  {
+   *.o (RESET, +First)
+   *(InRoot$$Sections)
+   .ANY (+RO)
+   .ANY (+XO)
+  }
+  RW_IRAM1 0x24000000 0x00080000  {  ; AXI SRAM
+   .ANY (+RW +ZI)
+  }
+}
+
+; 新增：D2 SRAM1 作为非 Cacheable DMA 区
+LR_DMA_BUFFER 0x30000000 0x00008000  {
+  RW_DMA_BUFFER 0x30000000 0x00008000  {
+    .ANY (.dma_buffer)           ; 吸收所有 .dma_buffer 段
+  }
+}
+```
+
+### 8.6 DMA 缓冲区迁移
+
+#### Keil AC5 语法
+
+```c
+// adc.c:38
+__attribute__((section(".dma_buffer"), aligned(32)))
+static uint32_t adc_reg_buffer[2];
+```
+
+- `section(".dma_buffer")` 指定段名，与 scatter 对应
+- `aligned(32)` 对齐到 Cache Line（虽然非 Cacheable 不严格要求，但相邻变量若在 Cacheable 区可避免伪共享）
+
+#### 需要迁移的变量清单
+
+| 文件 | 变量 | 修改 |
+|------|------|------|
+| `Core/Src/adc.c` | `adc_reg_buffer[2]` | 加 section 属性 |
+| `Core/Src/encoder.c` | DPT RX/TX buffer | 加 section 属性 |
+| `Core/Src/usart.c` | `debug_rx_buffer` / TX 临时缓冲 | 加 section 属性 |
+
+### 8.7 启用顺序（main.c）
+
+```c
+int main(void)
+{
+  /* USER CODE BEGIN 1 */
+  SCB_EnableICache();
+  /* USER CODE END 1 */
+
+  /* MPU Configuration--------------------------------------------------------*/
+  MPU_Config();              // 先配 MPU（CubeMX 生成，包含 Region 1）
+
+  /* USER CODE BEGIN SysInit */
+  SCB_EnableDCache();        // MPU 生效后再开 DCache
+  /* USER CODE END SysInit */
+  ...
+}
+```
+
+**顺序关键**：
+1. ICache 任何时候都能开
+2. DCache 必须在 MPU 配置好之后再开
+3. 否则 DMA 缓冲区被 Cache 污染，首帧就错
+
+### 8.8 验证清单
+
+- [ ] `printf` 输出正常（USART TX DMA 方向）
+- [ ] DPT 编码器 `real_position` 读数正确（RS485 RX DMA 方向）
+- [ ] `Trig/Succ` 计数正常递增（编码器触发 + 应答）
+- [ ] `adc_reg_buffer` 读出的 VDC/温度值合理（ADC RX DMA 方向）
+- [ ] 调试命令 `logid 100` 可响应（USART RX DMA 方向）
+- [ ] ISR `last/max` 下降到预期区间
+
+### 8.9 回退方案
+
+若开 DCache 后出现异常，临时回退两种选择：
+
+1. **代码回退**：注释 `SCB_EnableDCache()`，只保留 ICache —— 损失 -3~5us，但阶段 1 收益不丢
+2. **手动同步**：不动 MPU，在 DMA 接收完成回调里手动 `SCB_InvalidateDCache_by_Addr()`，缓冲发送前 `SCB_CleanDCache_by_Addr()`
+
+```c
+// 示例：ADC 规则通道 DMA 完成回调
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
+  SCB_InvalidateDCache_by_Addr((uint32_t*)adc_reg_buffer, sizeof(adc_reg_buffer));
+  // ... 正常处理
+}
+```
+
+手动同步方案简单但每处都要写，容易漏，长期维护成本高。方案 A（MPU + 专用段）是工业惯例。
+
+---
+
+## 九、参考
 
 - STM32H7 Cache 使用注意：AN4839
 - Cortex-M7 取指流水线与 Flash ART：AN4891

@@ -537,6 +537,8 @@ void ADC_CalibrateOffsets(uint16_t n_samples)
 void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
     if (hadc->Instance == ADC1) {
+        uint32_t t0 = DWT_GetCycles();
+
         /* 读取同步采样的A/B相电流 */
         int32_t raw_a = (int32_t)HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1);
         int32_t raw_b = (int32_t)HAL_ADCEx_InjectedGetValue(&hadc2, ADC_INJECTED_RANK_1);
@@ -550,16 +552,25 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
         g_foc_current.tim1_done_cnt = TIM1_GetLinearCnt();
         g_foc_current.sample_count++;
 
+        uint32_t t1 = DWT_GetCycles();
+        g_adc_isr_t_read = t1 - t0;
+        if (g_adc_isr_t_read > g_adc_isr_t_read_max) g_adc_isr_t_read_max = g_adc_isr_t_read;
+
         /* 编码器计算（10kHz，读取DPT最新异步缓冲数据） */
         Encoder_data_Calculate(&controller_eyou, 10000);
         Encoder_out_data_Calculate(&controller_eyou, 10000);
+
+        uint32_t t2 = DWT_GetCycles();
+        g_adc_isr_t_enc = t2 - t1;
+        if (g_adc_isr_t_enc > g_adc_isr_t_enc_max) g_adc_isr_t_enc_max = g_adc_isr_t_enc;
 
         /* FOC 调度分支 */
         controller_eyou.Ia_raw = (uint16_t)raw_a;
         controller_eyou.Ib_raw = (uint16_t)raw_b;
 
         if (controller_eyou.foc_run >= 1) {
-            /* 闭环模式：三环调度（含 phase_current_sample + Clarke/Park + PID + SVPWM） */
+            /* 闭环模式：三环调度（含 phase_current_sample + Clarke/Park + PID + SVPWM）
+             * pos/vel/cur 各段在 MC_Loop_Schedule 内部打时间戳 */
             MC_Loop_Schedule(&controller_eyou);
         } else if (g_foc_openloop_enable) {
             /* 开环模式：独立电流采样 + 开环SVPWM */

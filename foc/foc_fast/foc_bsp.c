@@ -16,11 +16,19 @@
 #include "ifly_led.h"
 #include "ifly_test.h"
 #include "tim.h"
+#include "adc.h"
+#include "encoder.h"
 #include "flash_port.h"
+#include "stm32h7xx_hal.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+
+/* main.c 中定义的开环测试参数（logid 120 用） */
+extern uint8_t open_loop_mode;
+extern int16_t v_d_test;
+extern int16_t v_q_test;
 
 uint8_t dbgRecvBuf[1024];
 volatile uint16_t usart_rx_len = 0;
@@ -406,6 +414,143 @@ void dbg_log_print(void) {
                (controller_eyou.position_ref - controller_eyou.real_position_out) / 1024.0,
                controller_eyou.FlashData.mech_offest_out);
         break;
+    case 110: {
+        /* ADC ISR 分段耗时（us, 480MHz → 1us=480 cycles）
+         * 格式 last/max, 单位 us
+         * total = 整体 ISR 耗时
+         * read  = 电流 raw 读取 + 校准结构更新
+         * enc   = Encoder_data_Calculate + Encoder_out_data_Calculate
+         * pos   = foc_position_close_loop (2.5kHz, 4 拍 1 次)
+         * vel   = foc_velocity_close_loop (5kHz, 2 拍 1 次)
+         * cur   = foc_current_close_loop + SVPWM (10kHz, 每拍) */
+        uint32_t t_tot = g_adc_isr_cycles;
+        uint32_t t_tot_max = g_adc_isr_cycles_max;
+        uint32_t t_read = g_adc_isr_t_read, t_read_max = g_adc_isr_t_read_max;
+        uint32_t t_enc  = g_adc_isr_t_enc,  t_enc_max  = g_adc_isr_t_enc_max;
+        uint32_t t_pos  = g_adc_isr_t_pos,  t_pos_max  = g_adc_isr_t_pos_max;
+        uint32_t t_vel  = g_adc_isr_t_vel,  t_vel_max  = g_adc_isr_t_vel_max;
+        uint32_t t_cur  = g_adc_isr_t_cur,  t_cur_max  = g_adc_isr_t_cur_max;
+        printf("adc_isr_us tot:%lu/%lu read:%lu/%lu enc:%lu/%lu pos:%lu/%lu vel:%lu/%lu cur:%lu/%lu\r\n",
+               (unsigned long)(t_tot / 480),  (unsigned long)(t_tot_max / 480),
+               (unsigned long)(t_read / 480), (unsigned long)(t_read_max / 480),
+               (unsigned long)(t_enc / 480),  (unsigned long)(t_enc_max / 480),
+               (unsigned long)(t_pos / 480),  (unsigned long)(t_pos_max / 480),
+               (unsigned long)(t_vel / 480),  (unsigned long)(t_vel_max / 480),
+               (unsigned long)(t_cur / 480),  (unsigned long)(t_cur_max / 480));
+        break;
+    }
+    case 120: {
+        /* 开环测试状态（每 1s 打印一次，屏蔽 logfreq 低值刷屏）
+         * 原 main.c "OpenLoop" 调试块 */
+        static uint32_t t120 = 0;
+        uint32_t now = HAL_GetTick();
+        if (now - t120 < 1000) break;
+        t120 = now;
+        printf("OpenLoop: theta=%u I_a=%d I_b=%d I_c=%d V_d=%d V_q=%d\r\n",
+               controller_eyou.theta_elec,
+               controller_eyou.I_a, controller_eyou.I_b, controller_eyou.I_c,
+               v_d_test, v_q_test);
+        break;
+    }
+    case 130: {
+        /* DPT 编码器统计（触发频率/成功/跳过 + 最新角度，每 1s 打印）
+         * DPT_GetAndResetStats 会清零累计量，依赖真实 1s 窗口 —— 不可用 logfreq 替代 */
+        static uint32_t t130 = 0;
+        uint32_t now = HAL_GetTick();
+        uint32_t elapsed_ms = now - t130;
+        if (elapsed_ms < 1000) break;
+        t130 = now;
+
+        uint32_t trig, succ, skip, last_us, min_us, max_us;
+        DPT_GetAndResetStats(&trig, &succ, &skip, &last_us, &min_us, &max_us);
+
+        DPT_Angles angles;
+        DPT_GetLatestAngles(&angles);
+
+        uint32_t freq_hz = (trig * 1000) / elapsed_ms;
+        printf("Inner:%.2f Outer:%.2f Sta:0x%02X | Trig:%luHz Succ:%lu Skip:%lu | Enc_us last=%lu min=%lu max=%lu\r\n",
+               angles.inner_deg, angles.outer_deg, angles.status,
+               (unsigned long)freq_hz, (unsigned long)succ, (unsigned long)skip,
+               (unsigned long)last_us, (unsigned long)min_us, (unsigned long)max_us);
+        break;
+    }
+    case 140: {
+        /* CC4 / Enc / ADC 相对时序（以 ADC ISR entry 为 0 时刻，每 1s）
+         * 原 main.c "时序测试" 块 */
+        static uint32_t t140 = 0;
+        uint32_t now = HAL_GetTick();
+        if (now - t140 < 1000) break;
+        t140 = now;
+
+        uint32_t t_cc4_in   = g_tim1_cc4_cycles;
+        uint32_t t_cc4_out  = g_tim1_cc4_exit_cycles;
+        uint32_t t_enc_done = g_tim1_enc_done_cycles;
+        uint32_t t_adc_in   = g_adc_isr_in_cycles;
+        uint32_t t_adc_out  = g_adc_isr_out_cycles;
+
+        int32_t d_adc_out  = (int32_t)(t_adc_out  - t_adc_in) / 480;
+        int32_t d_cc4_in   = (int32_t)(t_cc4_in   - t_adc_in) / 480;
+        int32_t d_cc4_out  = (int32_t)(t_cc4_out  - t_adc_in) / 480;
+        int32_t d_enc_done = (int32_t)(t_enc_done - t_adc_in) / 480;
+        /* 编码器 44us 后完成，可能是上一周期完成时刻，负值加 100us 换算 */
+        if (d_enc_done < 0) d_enc_done += 100;
+
+        printf("T0=ADC_in | ADC_out=%+ldus CC4_in=%+ldus CC4_out=%+ldus Enc_done=%+ldus\r\n",
+               (long)d_adc_out, (long)d_cc4_in, (long)d_cc4_out, (long)d_enc_done);
+        break;
+    }
+    case 150: {
+        /* ADC 注入采样速率 + 电流原始值 + 校准 offset + TIM1 完成时刻（每 1s）
+         * 原 main.c "ADC注入采样检测" 块 */
+        static uint32_t t150 = 0;
+        static uint32_t last_sample_count = 0;
+        uint32_t now = HAL_GetTick();
+        uint32_t elapsed_ms = now - t150;
+        if (elapsed_ms < 1000) break;
+        t150 = now;
+
+        uint32_t cnt_now = g_foc_current.sample_count;
+        int32_t  ia      = g_foc_current.i_a_raw;
+        int32_t  ib      = g_foc_current.i_b_raw;
+        uint32_t t_done  = g_foc_current.tim1_done_cnt;
+        int32_t  off_a   = g_adc_offset_a;
+        int32_t  off_b   = g_adc_offset_b;
+
+        uint32_t delta   = cnt_now - last_sample_count;
+        last_sample_count = cnt_now;
+        uint32_t rate_hz = (delta * 1000) / elapsed_ms;
+
+        /* TIM1 CNT 480MHz / 2(中央对齐) → 240 ticks/us */
+        printf("ADC Rate=%luHz Cnt=%lu | Ia=%ld Ib=%ld | OffA=%ld OffB=%ld | t_done=%lu.%luus\r\n",
+               (unsigned long)rate_hz, (unsigned long)cnt_now, (long)ia, (long)ib,
+               (long)off_a, (long)off_b,
+               (unsigned long)(t_done / 240), (unsigned long)((t_done % 240) * 10 / 240));
+        break;
+    }
+    case 151: {
+        /* ADC 注入 + 规则通道 VDC/温度 监控 + ADC/DMA 状态（每 1s）
+         * 原 main.c "ADC监控" 块 */
+        static uint32_t t151 = 0;
+        uint32_t now = HAL_GetTick();
+        if (now - t151 < 1000) break;
+        t151 = now;
+
+        int32_t  ia      = g_foc_current.i_a_raw;
+        int32_t  ib      = g_foc_current.i_b_raw;
+        uint32_t inj_cnt = g_foc_current.sample_count;
+        uint32_t vdc     = g_vdc_raw;
+        uint32_t t_mot   = g_temp_motor_raw;
+        uint32_t t_mos   = g_temp_mos_raw;
+        uint32_t adc1_st = hadc1.State;
+        uint32_t dma_st  = hadc1.DMA_Handle ? hadc1.DMA_Handle->State : 0;
+        uint32_t cb_cnt  = g_reg_callback_count;
+
+        printf("Inj Ia=%ld Ib=%ld Cnt=%lu | Reg VDC=%lu Tmot=%lu Tmos=%lu | ADC=0x%lX DMA=0x%lX CB=%lu\r\n",
+               (long)ia, (long)ib, (unsigned long)inj_cnt,
+               (unsigned long)vdc, (unsigned long)t_mot, (unsigned long)t_mos,
+               (unsigned long)adc1_st, (unsigned long)dma_st, (unsigned long)cb_cnt);
+        break;
+    }
     case 160:
         /* 写Flash：把当前FlashData保存 */
         WriteDataToFlash();

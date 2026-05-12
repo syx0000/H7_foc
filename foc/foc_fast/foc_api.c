@@ -18,6 +18,7 @@
 #include "ifly_flux_ident.h"
 #include "ifly_inertia_ident.h"
 #include "adc.h"
+#include "tim.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -270,11 +271,19 @@ uint8_t MC_Loop_Schedule(ControllerStruct* controller) {
     /* 辨识模式下只跑电流环，避免速度环/位置环干扰 */
     if (!controller->ident_test.enable) {
         if ((controller->count_loop % POSITION_CALCULATE_DIV) == 0) {
+            uint32_t tp0 = DWT_GetCycles();
             foc_position_close_loop(controller);
+            uint32_t tp1 = DWT_GetCycles();
+            g_adc_isr_t_pos = tp1 - tp0;
+            if (g_adc_isr_t_pos > g_adc_isr_t_pos_max) g_adc_isr_t_pos_max = g_adc_isr_t_pos;
         }
 
         if ((controller->count_loop % VELOCETY_CALCULATE_DIV) == 0) {
+            uint32_t tv0 = DWT_GetCycles();
             foc_velocity_close_loop(controller);
+            uint32_t tv1 = DWT_GetCycles();
+            g_adc_isr_t_vel = tv1 - tv0;
+            if (g_adc_isr_t_vel > g_adc_isr_t_vel_max) g_adc_isr_t_vel_max = g_adc_isr_t_vel;
         }
     }
 
@@ -282,7 +291,11 @@ uint8_t MC_Loop_Schedule(ControllerStruct* controller) {
         controller->count_loop = 0;
     }
 
+    uint32_t tc0 = DWT_GetCycles();
     foc_current_close_loop(controller);
+    uint32_t tc1 = DWT_GetCycles();
+    g_adc_isr_t_cur = tc1 - tc0;
+    if (g_adc_isr_t_cur > g_adc_isr_t_cur_max) g_adc_isr_t_cur_max = g_adc_isr_t_cur;
     return 1;
 }
 

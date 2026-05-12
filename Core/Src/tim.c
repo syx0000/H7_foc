@@ -28,6 +28,18 @@ volatile uint32_t g_adc_isr_out_cnt    = 0;  /* ADC ISR退出时的TIM1线性CNT
 volatile uint32_t g_adc_isr_cycles     = 0;  /* 上一次ADC ISR耗时（DWT周期） */
 volatile uint32_t g_adc_isr_cycles_max = 0;  /* ADC ISR最大耗时 */
 
+/* ADC ISR 分段耗时 */
+volatile uint32_t g_adc_isr_t_read    = 0;
+volatile uint32_t g_adc_isr_t_enc     = 0;
+volatile uint32_t g_adc_isr_t_pos     = 0;
+volatile uint32_t g_adc_isr_t_vel     = 0;
+volatile uint32_t g_adc_isr_t_cur     = 0;
+volatile uint32_t g_adc_isr_t_read_max = 0;
+volatile uint32_t g_adc_isr_t_enc_max  = 0;
+volatile uint32_t g_adc_isr_t_pos_max  = 0;
+volatile uint32_t g_adc_isr_t_vel_max  = 0;
+volatile uint32_t g_adc_isr_t_cur_max  = 0;
+
 /* USER CODE END 0 */
 
 TIM_HandleTypeDef htim1;
