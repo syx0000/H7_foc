@@ -29,6 +29,11 @@ static uint8_t s_auto_report = 0;
 /* 发送失败计数器 (调试用) */
 static uint32_t s_tx_fail_count = 0;
 
+/* CAN 超时保护：收到有效帧时重置，1ms 递减，归零停机 */
+#define CAN_TIMEOUT_MS 200
+static volatile uint16_t s_can_timeout_cnt = 0;
+static uint8_t s_can_timeout_enabled = 0;
+
 /* ========== 访问全局控制器 ========== */
 extern ControllerStruct controller_eyou;
 
@@ -379,6 +384,8 @@ static void handle_ctrl_frame(const uint8_t *data, uint32_t len) {
 
 /* ========== 顶层 RX 分发 (覆盖 fdcan.c 的 weak 回调) ========== */
 void fdcan_rx_user(uint32_t id, const uint8_t *data, uint32_t len) {
+    s_can_timeout_cnt = CAN_TIMEOUT_MS;
+    if (!s_can_timeout_enabled) s_can_timeout_enabled = 1;
     /* 广播查询: 所有从站回 0x100+ID */
     if (id == CAN_WLY_ID_QUERY_BCAST) {
         send_status_frame();
@@ -428,7 +435,13 @@ void can_wly_set_node_id(uint8_t id) {
 
 uint32_t can_wly_get_tx_fail_count(void) { return s_tx_fail_count; }
 
-/* 1ms tick: 自动上报模式下每 ms 广播一次状态 */
+/* 1ms tick: 自动上报 + CAN 超时保护 */
 void can_wly_tick_1ms(void) {
     if (s_auto_report) send_status_frame();
+
+    if (s_can_timeout_enabled && s_can_timeout_cnt > 0) {
+        if (--s_can_timeout_cnt == 0) {
+            controller_eyou.ServoErrFlag.Bit.CommunicateErr = 1;
+        }
+    }
 }

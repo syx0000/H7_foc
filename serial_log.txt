@@ -1,0 +1,30 @@
+LT H7 foc start
+Calibrating ADC offsets...
+ADC calibration done: Off_a=32677 Off_b=32904
+Initializing FOC controller...
+Flash: InvertDirflag=1, mech_offest_out=0, elec_offest_0/1=12723/34402
+Flash write OK @0x081E0000, 172 bytes
+Flash: MaxPosLim=184320, MinPosLim=-184320
+FlashData: CurPID=45/4/0 SpdPID=1500/10/0 PosPID=3000/9/0 FF=300
+real_position_out circle_count_out -1
+Starting motor identification...
+VDC ADC raw = 43591, voltage (before divider scaling) = 2.195 V
+Motor params loaded from Flash: Rs=0.0794 Ohm  Ld=0.1133 mH  Lq=0.1163 mH
+  psi_f=0.009277 Wb
+  J=1.121e-04 kg*m^2
+FOC initialization done, NPP=8, foc_run=2
+LT H7 foc start
+Calibrating ADC offsets...
+ADC calibration done: Off_a=32677 Off_b=32908
+Initializing FOC controller...
+Flash: InvertDirflag=1, mech_offest_out=0, elec_offest_0/1=12723/34402
+Flash write OK @0x081E0000, 172 bytes
+Flash: MaxPosLim=184320, MinPosLim=-184320
+FlashData: CurPID=45/4/0 SpdPID=1500/10/0 PosPID=3000/9/0 FF=300
+real_position_out circle_count_out -1
+Starting motor identification...
+VDC ADC raw = 43582, voltage (before divider scaling) = 2.195 V
+Motor params loaded from Flash: Rs=0.0794 Ohm  Ld=0.1133 mH  Lq=0.1163 mH
+  psi_f=0.009277 Wb
+  J=1.121e-04 kg*m^2
+FOC initialization done, NPP=8, foc_run=2

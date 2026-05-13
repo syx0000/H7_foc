@@ -35,6 +35,7 @@
 #include "foc_data.h"
 #include "encoder_calc.h"
 #include "ifly_test.h"
+#include "ifly_fault.h"
 #include "can_wly.h"
 /* USER CODE END Includes */
 
@@ -191,8 +192,11 @@ int main(void)
 	ResetControlData(&controller_eyou);
 
 	/* 8. 辨识完成，设置运行状态 */
-	controller_eyou.foc_run = 2;
-	printf("FOC initialization done, NPP=%d, foc_run=%d\r\n", NPP, controller_eyou.foc_run);
+	controller_eyou.foc_run = 0;
+	controller_eyou.controller_mode = PROFILE_TORQUE_MODE;  // 默认电流模式
+	controller_eyou.I_q_ref = 0;                            // 默认0输出
+	printf("FOC initialization done, NPP=%d, foc_run=%d, mode=%d (Torque), I_q_ref=0\r\n",
+	       NPP, controller_eyou.foc_run, controller_eyou.controller_mode);
 
 	/* 启动USART1调试命令接收 */
 	USART1_DebugRx_Start();
@@ -224,6 +228,30 @@ int main(void)
 
 		/* 带宽测试 done 标志轮询 + 结果打印 */
 		Test_log_print();
+
+		/* 1ms 周期任务：故障保护 + 状态监控 */
+		static uint32_t fault_tick = 0;
+		if (HAL_GetTick() - fault_tick >= 1) {
+			fault_tick = HAL_GetTick();
+
+			/* ADC 数据转换（VDC / 温度） */
+			adc_convert();
+
+			/* 故障检测 */
+			dcVoltageProFunc();          // 母线过/欠压
+			boradTempProFunc();          // 板温过温
+			busOverCurrentCheck();       // 母线过流
+			LockedRotorProFunc();        // 堵转检测
+			driverChipFaultCheck();      // DRV8353 nFAULT 引脚
+			motorSpeedOverCheck();       // 过速检测
+			motorSpeedOffsetCheck();     // 速度跟随偏差
+			motorPosOffsetCheck();       // 位置跟随偏差
+			motorCurrentOffsetCheck();   // 电流跟随偏差
+			motorOverPosCheck();         // 软位置限位
+
+			/* 故障总分发：扫描所有故障位，触发时停机 */
+			CheckAndHandleAllFaultBits();
+		}
 
 		/* CAN 1ms tick (主动上报模式, 默认关闭) */
 		static uint32_t can_tick = 0;

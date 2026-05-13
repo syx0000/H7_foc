@@ -358,6 +358,28 @@ void dbg_cmd_set(void) {
         printf("run mod_Target: %d, %d\r\n", controller_eyou.controller_mode, Data);
     }
 
+    /* enable<0/1>: PWM 使能/失能控制
+       用法: enable1 → 使能 PWM 输出
+             enable0 → 失能 PWM 输出 */
+    if (NULL != strstr((char *)dbgRecvBuf, "enable")) {
+        loc   = strstr((char *)dbgRecvBuf, "enable");
+        token = strtok(loc, "enable");
+        int en = atoi(token);
+
+        if (en) {
+            controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
+            controller_eyou.I_q_ref = 0;
+            controller_eyou.foc_run = 2;
+            TIM1->CCER |= 0x0555u;
+            printf("PWM enabled, mode=Torque, I_q_ref=0 (CCER=0x%04X)\r\n", (unsigned int)TIM1->CCER);
+        } else {
+            /* 失能 PWM 输出 + 停止 FOC */
+            TIM1->CCER &= ~0x0555u;
+            controller_eyou.foc_run = 0;
+            printf("PWM disabled, foc_run=0 (CCER=0x%04X)\r\n", (unsigned int)TIM1->CCER);
+        }
+    }
+
     memset((uint8_t *)dbgRecvBuf, 0, usart_rx_len);
     usart_rx_len = 0;
 }
@@ -528,27 +550,32 @@ void dbg_log_print(void) {
         break;
     }
     case 151: {
-        /* ADC 注入 + 规则通道 VDC/温度 监控 + ADC/DMA 状态（每 1s）
-         * 原 main.c "ADC监控" 块 */
+        /* 温度 + 电压监控（每 1s，单位 0.1）
+         * Udc: 0.1V, Temp: 0.1°C */
         static uint32_t t151 = 0;
         uint32_t now = HAL_GetTick();
         if (now - t151 < 1000) break;
         t151 = now;
 
-        int32_t  ia      = g_foc_current.i_a_raw;
-        int32_t  ib      = g_foc_current.i_b_raw;
-        uint32_t inj_cnt = g_foc_current.sample_count;
-        uint32_t vdc     = g_vdc_raw;
-        uint32_t t_mot   = g_temp_motor_raw;
-        uint32_t t_mos   = g_temp_mos_raw;
-        uint32_t adc1_st = hadc1.State;
-        uint32_t dma_st  = hadc1.DMA_Handle ? hadc1.DMA_Handle->State : 0;
-        uint32_t cb_cnt  = g_reg_callback_count;
+        /* 调用 ADC 转换函数，更新 motorProValue */
+        adc_convert();
 
-        printf("Inj Ia=%ld Ib=%ld Cnt=%lu | Reg VDC=%lu Tmot=%lu Tmos=%lu | ADC=0x%lX DMA=0x%lX CB=%lu\r\n",
-               (long)ia, (long)ib, (unsigned long)inj_cnt,
-               (unsigned long)vdc, (unsigned long)t_mot, (unsigned long)t_mos,
-               (unsigned long)adc1_st, (unsigned long)dma_st, (unsigned long)cb_cnt);
+        /* 获取转换后的值（已经是 0.1 单位）*/
+        uint32_t udc_01v = motorProValue.Udc;           /* 0.1V */
+        int8_t t_board_c = motorProValue.board_temp;    /* °C */
+        int8_t t_motor_c = motorProValue.motor_temp;    /* °C */
+
+        /* 转换为 0.1 单位 */
+        int16_t t_board_01c = t_board_c * 10;          /* 0.1°C */
+        int16_t t_motor_01c = t_motor_c * 10;          /* 0.1°C */
+
+        printf("Udc=%lu(0.1V) Tboard=%d(0.1C) Tmotor=%d(0.1C) | Raw: VDC=%lu Tmos=%lu Tmot=%lu\r\n",
+               (unsigned long)udc_01v,
+               (int)t_board_01c,
+               (int)t_motor_01c,
+               (unsigned long)g_vdc_raw,
+               (unsigned long)g_temp_mos_raw,
+               (unsigned long)g_temp_motor_raw);
         break;
     }
     case 160:
@@ -635,6 +662,12 @@ void dbg_log_print(void) {
         dbgLogFlag = 0;
         break;
     }
+    case 163:
+        /* 清除所有故障标志 */
+        ClearFaults(1);
+        printf("All faults cleared, ready to restart\r\n");
+        dbgLogFlag = 0;
+        break;
     default:
         break;
     }

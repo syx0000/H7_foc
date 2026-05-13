@@ -17,17 +17,22 @@
 extern ifly_Err_Pro_Type motorProValue;
 extern str_FILTER1 udcFilter;
 Portection_Value Threshold = {
-    .LowUdc            = 348,
-    .OverUdc           = 552,
-    .TemBorad          = 85,
-    .TemBoradWarn      = 75,
+    /* 母线电压（对齐 motor_h7：OVP=60V, UVP=24V） */
+    .LowUdc            = 240,        /* 24.0 V (0.1V) */
+    .OverUdc           = 600,        /* 60.0 V (0.1V) */
+    /* 板温（对齐 motor_h7：警告 90°C, 停机 100°C） */
+    .TemBorad          = 100,        /* 100°C 停机 */
+    .TemBoradWarn      = 90,         /* 90°C 警告 */
+    /* 速度（保持原值） */
     .velocity_Limit    = 4136960,
     .velocity_coe      = 1,
     .PositionErr       = 2048 * 20,
     .PositionReachTime = 256,
+    /* 堵转（保持原值，PHU 风格判据） */
     .BlockTorque       = 1024 * 13,
-    .OverCurrentTime   = 5,
-    .OverCurrent       = 28672,
+    /* 过流（对齐 motor_h7：58A，10 次滤波） */
+    .OverCurrentTime   = 10,         /* 10ms */
+    .OverCurrent       = 59392,      /* 58A (Q10) */
     .BlockTime         = 30,
     .BlockSpeed        = 103424,
     .UVWCurrentLimit   = 6860,

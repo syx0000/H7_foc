@@ -105,7 +105,7 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
 #### 命令列表
 - `logid<N>`: 切换周期日志
   - 10=电角度 / 30=电压 / 40=电流PI / 50=速度 / 60=CCR / 70=相电流 / 90=原始ADC / 100=位置
-  - 160=写Flash / 161=擦Flash / 162=对比 RAM vs Flash 参数
+  - 160=写Flash / 161=擦Flash / 162=对比 RAM vs Flash 参数 / 163=清除故障标志
 - `logfreq<N>`: 日志打印周期 ms
 - `CurrentPIDKp<a>Ki<b>Kd<c>`: 手动调电流环 PID
 - `SpeedPIDKp<a>Ki<b>Kd<c>`: 手动调速度环 PID
@@ -113,6 +113,7 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
 - `injectV<mv>`: 固定角度注入电压（V_d）调试 PWM 尺度
 - `Cali`: 电角度偏置辨识 + Flash 保存
 - `RuncmdXMYtarZ`: 启动运行（cmd=foc_run, M=mode, tar=目标值）
+- `enable<0/1>`: PWM 使能控制（1=使能，0=失能+停止FOC）
 - **bwtest 测试链** (按依赖顺序):
   - `bwtest1`: 电流环带宽测试 (10~2500Hz)
   - `bwtest2`: 速度环带宽测试 (1~200Hz, 偏置 10rpm 注入 2rpm)
@@ -227,9 +228,56 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
 
 ### 当前编译规模
 ```
-Program Size: Code=79520 RO-data=3940 RW-data=632 ZI-data=27584
+Program Size: Code=81132 RO-data=4640 RW-data=708 ZI-data=27588
 "cubemx_yxsui\cubemx_yxsui.axf" - 0 Error(s), 0 Warning(s).
 ```
+
+## 烧录（CMSIS-DAP）
+
+工程已在 `MDK-ARM/cubemx_yxsui.uvoptx` 配置 `BIN\CMSIS_AGDI.dll`，Flash 算法 `STM32H7x_2048.FLM`，目标 Bank1 起始 `0x08000000` / 大小 `0x200000`。
+
+### 命令行烧录
+```bash
+"C:/Keil_v5/UV4/UV4.exe" -f "MDK-ARM/cubemx_yxsui.uvprojx"
+```
+- 退出码 0 = 成功；UV4 无 stdout，烧录结果靠退出码判断。
+- **坑**: 加 `-o <logfile>` 参数会让 UV4 段错误 (ExitCode=139)，不要加日志重定向。
+- 该命令会 Erase → Program → Verify → Reset Run，可直接作为"DAP 重启"使用（抓 log 时用这个代替按复位键）。
+
+## 串口抓 log
+
+- **默认口**: COM4 @ 921600 (USART1, DMA TX)
+- **脚本**: `tools/capture_com.ps1` (PowerShell + System.IO.Ports.SerialPort)
+- **注意**: 这台机器上 `python` 是 Windows App 别名（静默退出，不可用），所以用 PowerShell 不用 pyserial
+
+```bash
+# 后台抓 30s 到 serial_log.txt
+powershell -ExecutionPolicy Bypass -File tools/capture_com.ps1 \
+    -PortName COM4 -Baud 921600 -Seconds 30 -OutFile serial_log.txt
+```
+
+参数: `-PortName` / `-Baud` / `-Seconds` / `-OutFile`。
+
+### 抓开机 log 的正确顺序
+1. 后台启动 `capture_com.ps1`（先占住串口）
+2. 触发复位：`UV4 -f ...` 或按板子复位键
+3. 等抓取超时后 `cat serial_log.txt`
+
+### 正常开机 log 关键行（用于判断启动是否健康）
+```
+LT H7 foc start
+ADC calibration done: Off_a=32677 Off_b=32904     ← ADC 零点应居中 (~32768)
+Flash: InvertDirflag=1, mech_offest_out=0, elec_offest_0/1=12723/34402
+FlashData: CurPID=45/4/0 SpdPID=1500/10/0 PosPID=3000/9/0 FF=300
+VDC ADC raw = 43591, voltage (before divider scaling) = 2.195 V   ← 分压前电压
+Motor params loaded from Flash: Rs=0.0794 Ohm  Ld=0.1133 mH  Lq=0.1163 mH
+FOC initialization done, NPP=8, foc_run=2         ← 闭环使能成功
+```
+
+### 故障诊断
+`FAULT! ServoErrFlag=0x<N>, PWM disabled` 的 bit 含义见 `foc/foc_app/ifly_fault.c` 中 `ServoErrFlag.Bit.*` 赋值处（grep `ServoErrFlag.Bit` 即得）。常见：
+- `0x02` = LowBusVolErr（母线欠压，通常电源没接或 VDC 通路异常）
+- `0x01` = OverBusVolErr, `0x04` = HighBoardTempErr, `0x08` = OverBusCurrentErr, 等。
 
 ## 代码结构
 

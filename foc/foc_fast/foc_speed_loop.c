@@ -43,7 +43,6 @@ void foc_velocity_close_loop(ControllerStruct* controller) {
        controller->controller_mode == CYCLIC_SYNC_POSITION_MODE)) {
     // PID
     int32_t TempIq = 0;
-    speedOffsetMonitor(controller);
     controller->IncPID_Speed.NowValue = controller->dtheta_mech;
     controller->IncPID_Speed.AimValue = controller->velocity_ref_filterd;
     controller->IncPID_Speed.PidRun(&controller->IncPID_Speed);
