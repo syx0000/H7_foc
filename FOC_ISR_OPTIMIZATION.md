@@ -1,6 +1,45 @@
 # FOC 主循环耗时分析与优化方案
 
-## 一、现象数据
+## 实施状态
+
+### ✅ 阶段 1 完成（2026-05-13）
+
+**改动**：
+1. CubeMX 开启 ICache（`System Core → CORTEX_M7 → CPU ICache: Enabled`）
+2. `foc_current_loop.c:101` 的 `weak_magn_control()` 调用加 `#if USE_WEAK_MAGN` 包裹
+3. Keil 工程已是 `Optim=3 + oTime=1`（Time 优先），无需改动
+
+**验证结果**：功能正常，ISR 耗时显著下降（具体数据待用户补充）。
+
+**提交**：`3eade00 开启 ICache + 关闭弱磁空转，FOC ISR 耗时优化阶段 1`
+
+---
+
+### ❌ 阶段 2 失败（DCache + DMA 缓冲迁移）
+
+**尝试改动**：
+1. CubeMX 开启 DCache + MPU Region 1 配置 D2 SRAM1 (0x30000000) 为非 Cacheable
+2. 用 `__attribute__((at(0x30000000)))` 将 DMA 缓冲区迁到 D2 SRAM1
+
+**失败原因**：
+- 串口无输出（HardFault 或 DMA 访问失败）
+- 可能原因：
+  1. D2 SRAM1 时钟未使能（`__HAL_RCC_D2SRAM1_CLK_ENABLE()` 加了也无效）
+  2. MPU Region 1 配置不完整（CubeMX 生成代码缺 `IsCacheable/IsShareable` 显式设置）
+  3. Keil AC5 的 `__attribute__((at()))` 与 DMA 缓冲区兼容性问题
+  4. DCache 一致性问题未完全解决
+
+**回退**：所有阶段 2 改动已回退，保留阶段 1 成果。
+
+**教训**：
+- STM32H7 的 DCache + DMA 一致性配置复杂，需要完整的 MPU + 时钟 + scatter 文件配合
+- Keil AC5 的 scatter 文件语法与 `.ANY` 匹配规则不直观，`.dma_buffer` 段被 `RW_IRAM2` 的 `.ANY (+RW +ZI)` 优先匹配
+- `__attribute__((at()))` 需要每个变量手动分配不同地址，维护成本高
+- 建议后续用 AC6 或 GCC，scatter 文件语法更清晰
+
+---
+
+## 一、现象数据（优化前）
 
 ```
 Inner:178.90 Outer:315.10 Sta:0x00 | Trig:10001Hz Succ:10001 Skip:0 | Enc(us):last=86 min=44 max=88
@@ -17,51 +56,35 @@ Inner:178.90 Outer:315.10 Sta:0x00 | Trig:10001Hz Succ:10001 Skip:0 | Enc(us):la
 
 ## 二、配置层面的三个大坑（收益最高）
 
-### ① CPU Cache 未启用 ⭐⭐⭐⭐⭐
+### ① CPU Cache 未启用 ⭐⭐⭐⭐⭐ ✅ 已完成
 
-`Core/Src/main.c:82~95`：只调用了 `MPU_Config()` 和 `HAL_Init()`，**没有** `SCB_EnableICache/DCache`。
+**原状态**：`Core/Src/main.c:82~95` 只调用了 `MPU_Config()` 和 `HAL_Init()`，**没有** `SCB_EnableICache/DCache`。
 
 - 代码运行在 Flash，不开 I-Cache 时每次取指都吃 Flash 等待周期（STM32H7 @480MHz 约 4~7 WS）。
 - 经验值：**开 I-Cache 后纯代码执行时间降到 1/3~1/5**。
 - `ISR entry=7us` 是典型的"Cache 没开"特征。
 
-**推荐修改**：在 `main()` 开头、`HAL_Init()` 之前加：
-```c
-SCB_EnableICache();
-SCB_EnableDCache();   // 若 DMA 缓冲区一致性没处理好，可先只开 I-Cache
-```
+**已实施**：CubeMX 勾选 `System Core → CORTEX_M7 → CPU ICache: Enabled`，生成代码自动在 `MPU_Config()` 之后插入 `SCB_EnableICache();`。
 
-> DCache 注意：ADC 规则通道 DMA 缓冲 `adc_reg_buffer[2]` 需要放到非 Cacheable 区域，或使用 `SCB_InvalidateDCache_by_Addr()`，否则会读到陈旧值。稳妥起见先只开 ICache。
-
-**预期收益：43us → 15~20us**
+**预期收益：43us → 15~20us**（实测待补充）
 
 ---
 
-### ② 编译器优化方向错误 ⭐⭐⭐⭐
+### ② 编译器优化方向错误 ⭐⭐⭐⭐ ✅ 已确认无需改
 
-`MDK-ARM/cubemx_yxsui.uvprojx`：
-```xml
-<Optim>4</Optim>     <!-- 4 = -O3 -->
-<oTime>0</oTime>     <!-- 0 = 为空间优化 -->
-```
+**检查结果**：`MDK-ARM/cubemx_yxsui.uvprojx` 已是 `Optim=3 (-O2) + oTime=1 (Time 优先)`，无需改动。
 
-Keil AC5 的 `Optim=4` 是 `-O3`，但 `oTime=0` 表示"优先空间"，空间策略会破坏热路径的除法/switch/内联。
-
-**推荐修改**：在 Keil 工程 `Options for Target → C/C++` 中勾选 **Optimize for Time**（等价 `oTime=1`）。
-
-**预期收益：再砍 20~30%**
+**预期收益：已包含在当前编译配置中**
 
 ---
 
-### ③ 关键代码未放置 ITCM/DTCM ⭐⭐⭐
+### ③ 关键代码未放置 ITCM/DTCM ⭐⭐⭐ ⏸️ 暂缓
 
-`foc/foc_fast/foc_bsp.h:28-34`：
-```c
-#define ATTR_RAMFUNC              // 空
-#define ATTR_PLACE_AT_FAST_RAM_INIT  // 空
-```
+**原状态**：`foc/foc_fast/foc_bsp.h:28-34` 的 `ATTR_RAMFUNC` 和 `ATTR_PLACE_AT_FAST_RAM_INIT` 为空宏。
 
 sin/cos 表、FOC kernel 函数都在 Flash，即使开 Cache 也有 miss 抖动（`max=67us` 就是 cache miss 尾部）。H7 有 64KB ITCM + 128KB DTCM，足够放所有 FOC 热代码。
+
+**暂缓原因**：需要修改 scatter 文件，Keil AC5 语法复杂，阶段 2 失败后暂缓。
 
 **预期收益：消除抖动，max 从 67us 接近 typical**
 
@@ -69,27 +92,22 @@ sin/cos 表、FOC kernel 函数都在 Flash，即使开 Cache 也有 miss 抖动
 
 ## 三、代码层面的热点（按耗时权重排序）
 
-### 🔥 热点 1：`weak_magn_control` 空转 —— **5~10us**
+### 🔥 热点 1：`weak_magn_control` 空转 —— **5~10us** ✅ 已完成
 
-`foc/foc_fast/foc_current_loop.c:101` 每周期调用 `weak_magn_control(controller)`。即使 `USE_WEAK_MAGN = 0`，外层包裹宏只是包了内部赋值分支，**函数本身仍在执行**：
+**原问题**：`foc/foc_fast/foc_current_loop.c:101` 每周期调用 `weak_magn_control(controller)`。即使 `USE_WEAK_MAGN = 0`，外层包裹宏只是包了内部赋值分支，**函数本身仍在执行**。
 
+**已实施**：把 `weak_magn_control` 的调用用 `#if USE_WEAK_MAGN` 包起来：
 ```c
-// foc_current_loop.c L213~246
-void weak_magn_control(ControllerStruct* controller){
-  float Us_buf[32] = {0};                                 // 栈上 128 字节每次清零
-  controller_eyou.Us_raw = sqrt(V_d*V_d + V_q*V_q);       // 标准库 sqrt
-  controller_eyou.Us = sliding_avg_filter(Us_buf, 32, ...); // 32 次循环求和
-  ...
-}
+#if USE_WEAK_MAGN
+  weak_magn_control(controller);
+#endif
 ```
 
-更糟：`Us_buf` 是栈变量，下次调用又被清零，`sliding_avg_filter` 的累加完全是废功。
-
-**修改**：把 `weak_magn_control` 的调用用 `#if USE_WEAK_MAGN` 包起来，和 `deadtime_compensation` 一样处理。
+**预期收益：-5us**
 
 ---
 
-### 🔥 热点 2：`svpwm_calc` 的海量整数除法 —— **5~8us**
+### 🔥 热点 2：`svpwm_calc` 的海量整数除法 —— **5~8us** ⏸️ 待优化
 
 `foc/foc_fast/foc_kernel.c:127~237`：每个 case 内部都是 `(Valpha * PWM_T / UDC)` 级别的常量除法，一个 switch 里有 **10+ 次除法**。
 
@@ -157,255 +175,67 @@ M7 间接跳转 + 打破内联 + `IncPIDCal` 内部还有 int64 乘法。
 
 ## 四、推荐修复顺序（按 ROI 降序）
 
-| # | 动作                                                                                   | 类型     | 预计收益             | 风险                                       |
-| - | -------------------------------------------------------------------------------------- | -------- | -------------------- | ------------------------------------------ |
-| 1 | `main()` 加 `SCB_EnableICache()`（DCache 视 DMA 处理情况再决定）                       | 配置     | **-20us**            | 单独开 ICache 最稳；DCache 需注意 DMA 一致 |
-| 2 | Keil 工程勾选 Optimize for Time（`oTime=1`）                                           | 配置     | **-8us**             | 无                                         |
-| 3 | `weak_magn_control` 调用处用 `#if USE_WEAK_MAGN` 包起来                                | 代码     | **-5us**             | 无                                         |
-| 4 | `check_phases_overcurrent_timesliced` 下放到 1kHz 慢环或换轻量算法                     | 代码     | **-3us（max 降更多）** | 需确认过流保护时序要求                     |
-| 5 | PID 函数指针改直接调用 `IncPIDCal`                                                     | 代码     | -1us                 | 无                                         |
-| 6 | `svpwm_calc` 预算 `PWM_T/UDC` 系数 + 常量除法改位移                                    | 代码     | -3us                 | 需对比波形                                 |
-| 7 | FOC 热代码 / sin 表放 ITCM/DTCM（`ATTR_RAMFUNC` / `ATTR_PLACE_AT_FAST_RAM_INIT`）     | 配置+链接 | 降抖动               | 需改 scatter 文件                          |
+| # | 动作 | 类型 | 状态 | 预计收益 | 风险 |
+| - | ---- | ---- | ---- | -------- | ---- |
+| 1 | CubeMX 开启 ICache | 配置 | ✅ 完成 | **-20us** | 无 |
+| 2 | Keil 工程 Optimize for Time | 配置 | ✅ 已是 | 已包含 | 无 |
+| 3 | `weak_magn_control` 加 `#if USE_WEAK_MAGN` | 代码 | ✅ 完成 | **-5us** | 无 |
+| 4 | `check_phases_overcurrent_timesliced` 下放到 1kHz 慢环 | 代码 | ⏸️ 待做 | **-3us（max 降更多）** | 需确认过流保护时序要求 |
+| 5 | PID 函数指针改直接调用 `IncPIDCal` | 代码 | ⏸️ 待做 | -1us | 无 |
+| 6 | `svpwm_calc` 预算 `PWM_T/UDC` 系数 + 常量除法改位移 | 代码 | ⏸️ 待做 | -3us | 需对比波形 |
+| 7 | FOC 热代码 / sin 表放 ITCM/DTCM | 配置+链接 | ⏸️ 暂缓 | 降抖动 | 需改 scatter 文件 |
+| 8 | DCache + DMA 缓冲迁 D2 SRAM | 配置+代码 | ❌ 失败 | -3~5us | 复杂度高，已回退 |
 
 ---
 
-## 五、立竿见影方案
-
-**只做前 3 项：43us → 预计 10~15us**，留出 70%+ CPU 给控制和通信。
-
-### Step 1：开 I-Cache
-
-`Core/Src/main.c` 的 `main()` 入口：
-```c
-int main(void)
-{
-  /* USER CODE BEGIN 1 */
-  SCB_EnableICache();
-  // SCB_EnableDCache();   // 先不开，待确认 DMA 缓冲一致性
-  /* USER CODE END 1 */
-
-  MPU_Config();
-  HAL_Init();
-  ...
-}
-```
-
-### Step 2：Keil 工程开 Optimize for Time
-
-`Options for Target → C/C++` → 勾选 `Optimize for Time`。
-
-### Step 3：关掉空转的 weak_magn_control
-
-`foc/foc_fast/foc_current_loop.c:101` 附近：
-```c
-#if USE_WEAK_MAGN
-  weak_magn_control(controller);
-#endif
-```
-
----
-
-## 六、验证方法
+## 五、验证方法
 
 修改前后对比 `ADC ISR: duration last / max(1s)` 日志字段，关注：
-- `last` 是否从 43us 降到 15us 以下；
-- `max(1s)` 是否从 67us 显著下降（消除 cache miss / 过流检测触发尾部）；
-- `entry` 是否从 7us 降到 1~2us（cache 效果最直接的体现）。
+- `last` 是否从 43us 降到目标值
+- `max(1s)` 是否显著下降（消除 cache miss / 过流检测触发尾部）
+- `entry` 是否从 7us 降到 1~2us（cache 效果最直接的体现）
+
+**阶段 1 实测结果**：（待用户补充）
 
 ---
 
-## 七、分阶段实施计划
+## 六、后续优化方向（待实施）
 
-### 阶段 1：低风险高收益（纯代码改动）
+### 优先级 1：代码层热点优化（低风险）
 
-| # | 动作 | 改动位置 | 预期收益 | 风险 |
-|---|------|---------|---------|------|
-| 1 | `main.c` 加 `SCB_EnableICache()`（仅 ICache） | `Core/Src/main.c` USER CODE BEGIN 1 | **-20us** | 零风险（ICache 无 DMA 一致性问题） |
-| 2 | Keil 勾选 Optimize for Time | `Options for Target → C/C++` | **-8us** | 零风险 |
-| 3 | `weak_magn_control` 加 `#if USE_WEAK_MAGN` | `foc_current_loop.c:101` | **-5us** | 零风险（本就是空转代码） |
+1. **`check_phases_overcurrent_timesliced` 下放到 1kHz 慢环**
+   - 当前每 4 拍触发一次 50 点循环，触发拍 ISR 延迟 +10us
+   - 改为轻量 peak-hold 算法或下放到主循环
+   - 预期：max 从 67us 降到 50us 以下
 
-**阶段 1 预期：ISR 43us → 10~15us**
+2. **PID 函数指针改直接调用**
+   - `foc_current_loop.c:91,97` 的 `PidRun` 函数指针改为直接调用 `IncPIDCal`
+   - 预期：-1us
 
-### 阶段 2：开启 DCache（需要 MPU 配合，见第八节）
+3. **`svpwm_calc` 除法优化**
+   - 预算 `PWM_T/UDC` 为 Q15 乘系数
+   - 常量除法改位移（`/1024` → `>>10`）
+   - 预期：-3us
 
-| # | 动作 | 改动位置 | 预期收益 | 风险 |
-|---|------|---------|---------|------|
-| 4 | CubeMX 配置 MPU Region 1 为非 Cacheable | CubeMX → CORTEX_M7 → MPU Settings | - | 配置错会 HardFault |
-| 5 | DMA 缓冲区加 `__attribute__((section(".dma_buffer")))` | adc.c / encoder.c | - | 需改 scatter 文件加段 |
-| 6 | `main.c` 加 `SCB_EnableDCache()` | main.c | **-3~5us** | 需先完成 4/5 |
-| 7 | `check_phases_overcurrent_timesliced` 下放到 1kHz 慢环 | `foc_current_loop.c:391~442` | **max -10us** | 需确认过流保护时序 |
+### 优先级 2：ITCM/DTCM 热代码放置（中风险）
 
-**阶段 2 预期：ISR 稳定 8~10us，max 抖动大幅降低**
+- 需要修改 Keil scatter 文件，语法复杂
+- 建议后续迁移到 AC6 或 GCC 后再做
+- 预期：消除 max 抖动
 
-### 阶段 3：ITCM/DTCM 热代码放置（需改链接脚本）
+### 优先级 3：DCache + DMA 缓冲迁移（高风险，已失败）
 
-| # | 动作 | 改动位置 | 预期收益 | 风险 |
-|---|------|---------|---------|------|
-| 8 | 修改 `.sct` scatter 文件，加 ITCM/DTCM 段 | `MDK-ARM/cubemx_yxsui/cubemx_yxsui.sct` | - | 链接脚本改错会无法启动 |
-| 9 | `ATTR_RAMFUNC` 宏定义为段属性，sin 表和 FOC kernel 加宏 | `foc_bsp.h` + 各 foc 热函数 | **抖动消除** | 需验证启动流程 |
-| 10 | PID 函数指针改直接调用 `IncPIDCal` | `foc_current_loop.c:91,97` | **-1us** | 零风险 |
-| 11 | `svpwm_calc` 预算 `PWM_T/UDC` 系数 + 常量除法改位移 | `foc_kernel.c:127~237` | **-3us** | 需对比波形 |
+**失败教训**：
+- STM32H7 的 DCache + DMA 一致性需要完整的 MPU + 时钟 + scatter 文件配合
+- Keil AC5 的 scatter 文件 `.ANY` 匹配规则不直观
+- `__attribute__((at()))` 需要手动分配地址，维护成本高
+- D2 SRAM 时钟使能后仍无输出，根因未明
 
-**阶段 3 预期：ISR 5~8us，无抖动**
-
----
-
-## 八、方案 A 详细设计：MPU 配置非 Cacheable 区 + DMA 缓冲区重定位
-
-### 8.1 背景
-
-开启 DCache 后，CPU 通过 Cache 访问 SRAM，而 DMA 外设直接访问 SRAM 物理内存。两者不同步会导致：
-
-- **DMA → CPU**（ADC/编码器）：DMA 把新数据写进 SRAM，CPU 从 Cache 读到旧值
-- **CPU → DMA**（USART TX）：CPU 写进 Cache 但未回写 SRAM，DMA 读到旧值
-
-### 8.2 涉及的 DMA 缓冲区清单
-
-| 缓冲 | 文件位置 | 方向 | 当前所在内存 |
-|------|---------|------|-------------|
-| `adc_reg_buffer[2]` | `Core/Src/adc.c:38` | DMA → CPU | AXI SRAM (默认 `.bss`) |
-| DPT 编码器 RX 缓冲 | `Core/Src/encoder.c` | DMA → CPU | AXI SRAM |
-| DPT 编码器 TX 缓冲 | `Core/Src/encoder.c` | CPU → DMA | AXI SRAM |
-| USART1 TX 缓冲（printf） | `Core/Src/usart.c` | CPU → DMA | AXI SRAM |
-| USART1 RX 缓冲（调试命令） | `Core/Src/usart.c` | DMA → CPU | AXI SRAM |
-
-### 8.3 内存布局设计
-
-STM32H743 有多块 SRAM：
-- **D1 AXI SRAM** `0x24000000` 512KB — 默认 `.bss/.data`
-- **D2 SRAM1** `0x30000000` 128KB — 适合做 DMA 缓冲（与 D2 外设同域）
-- **D2 SRAM2** `0x30020000` 128KB
-- **D2 SRAM3** `0x30040000` 32KB
-- **D3 SRAM4** `0x38000000` 64KB — 低功耗域，BDMA 用
-
-**选 D2 SRAM1 `0x30000000` 作为 DMA 专用区**，原因：
-- ADC/USART/DMA1/DMA2 都在 D2 域，总线路径短
-- 独立于主 AXI SRAM，不影响正常变量
-- 128KB 足够
-
-### 8.4 MPU Region 1 配置（CubeMX）
-
-在 CubeMX → CORTEX_M7 → MPU Settings 中：
-
-```
-Cortex Memory Protection Unit Region 1 Settings:
-  MPU Region:              Enabled
-  MPU Region Base Address: 0x30000000
-  MPU Region Size:         32KB (够用即可，16~64KB 均可)
-  MPU SubRegion Disable:   0x0
-  MPU TEX field level:     level 1
-  MPU Access Permission:   FULL ACCESS
-  MPU Instruction Access:  DISABLE
-  MPU Shareability Permission: ENABLE
-  MPU Cacheable Permission:    DISABLE   ← 关键
-  MPU Bufferable Permission:   ENABLE
-```
-
-**关键字段解释**：
-- `TEX=1, C=0, B=1, S=1` → Normal memory, Non-cacheable, Shareable（ARM MPU 标准配置）
-- `Shareable=ENABLE` 保证多总线主（CPU+DMA）看到一致顺序
-- `Cacheable=DISABLE` → 绕开 DCache
-
-### 8.5 链接脚本（scatter）修改
-
-`MDK-ARM/cubemx_yxsui/cubemx_yxsui.sct` 当前可能只有默认段，需加 D2 SRAM 段：
-
-```scatter
-; 原有部分保持不变
-LR_IROM1 0x08000000 0x00200000  {
-  ER_IROM1 0x08000000 0x00200000  {
-   *.o (RESET, +First)
-   *(InRoot$$Sections)
-   .ANY (+RO)
-   .ANY (+XO)
-  }
-  RW_IRAM1 0x24000000 0x00080000  {  ; AXI SRAM
-   .ANY (+RW +ZI)
-  }
-}
-
-; 新增：D2 SRAM1 作为非 Cacheable DMA 区
-LR_DMA_BUFFER 0x30000000 0x00008000  {
-  RW_DMA_BUFFER 0x30000000 0x00008000  {
-    .ANY (.dma_buffer)           ; 吸收所有 .dma_buffer 段
-  }
-}
-```
-
-### 8.6 DMA 缓冲区迁移
-
-#### Keil AC5 语法
-
-```c
-// adc.c:38
-__attribute__((section(".dma_buffer"), aligned(32)))
-static uint32_t adc_reg_buffer[2];
-```
-
-- `section(".dma_buffer")` 指定段名，与 scatter 对应
-- `aligned(32)` 对齐到 Cache Line（虽然非 Cacheable 不严格要求，但相邻变量若在 Cacheable 区可避免伪共享）
-
-#### 需要迁移的变量清单
-
-| 文件 | 变量 | 修改 |
-|------|------|------|
-| `Core/Src/adc.c` | `adc_reg_buffer[2]` | 加 section 属性 |
-| `Core/Src/encoder.c` | DPT RX/TX buffer | 加 section 属性 |
-| `Core/Src/usart.c` | `debug_rx_buffer` / TX 临时缓冲 | 加 section 属性 |
-
-### 8.7 启用顺序（main.c）
-
-```c
-int main(void)
-{
-  /* USER CODE BEGIN 1 */
-  SCB_EnableICache();
-  /* USER CODE END 1 */
-
-  /* MPU Configuration--------------------------------------------------------*/
-  MPU_Config();              // 先配 MPU（CubeMX 生成，包含 Region 1）
-
-  /* USER CODE BEGIN SysInit */
-  SCB_EnableDCache();        // MPU 生效后再开 DCache
-  /* USER CODE END SysInit */
-  ...
-}
-```
-
-**顺序关键**：
-1. ICache 任何时候都能开
-2. DCache 必须在 MPU 配置好之后再开
-3. 否则 DMA 缓冲区被 Cache 污染，首帧就错
-
-### 8.8 验证清单
-
-- [ ] `printf` 输出正常（USART TX DMA 方向）
-- [ ] DPT 编码器 `real_position` 读数正确（RS485 RX DMA 方向）
-- [ ] `Trig/Succ` 计数正常递增（编码器触发 + 应答）
-- [ ] `adc_reg_buffer` 读出的 VDC/温度值合理（ADC RX DMA 方向）
-- [ ] 调试命令 `logid 100` 可响应（USART RX DMA 方向）
-- [ ] ISR `last/max` 下降到预期区间
-
-### 8.9 回退方案
-
-若开 DCache 后出现异常，临时回退两种选择：
-
-1. **代码回退**：注释 `SCB_EnableDCache()`，只保留 ICache —— 损失 -3~5us，但阶段 1 收益不丢
-2. **手动同步**：不动 MPU，在 DMA 接收完成回调里手动 `SCB_InvalidateDCache_by_Addr()`，缓冲发送前 `SCB_CleanDCache_by_Addr()`
-
-```c
-// 示例：ADC 规则通道 DMA 完成回调
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
-  SCB_InvalidateDCache_by_Addr((uint32_t*)adc_reg_buffer, sizeof(adc_reg_buffer));
-  // ... 正常处理
-}
-```
-
-手动同步方案简单但每处都要写，容易漏，长期维护成本高。方案 A（MPU + 专用段）是工业惯例。
+**建议**：暂缓，等迁移到 AC6/GCC 或有更充裕时间再尝试。
 
 ---
 
-## 九、参考
+## 七、参考
 
 - STM32H7 Cache 使用注意：AN4839
 - Cortex-M7 取指流水线与 Flash ART：AN4891

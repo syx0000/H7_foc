@@ -35,7 +35,7 @@ extern volatile uint8_t USART_CONTROL;
 #define USE_COMMEND_RC_FILTER 0      //
 /*速度环指令滤波功能*/
 #define USE_SPEED_LOOP_SMOOTH 1    // 使用速度环斜坡滤波
-#define MIN_ACC_TIME 200            // 最小加减速时间,ms
+#define MIN_ACC_TIME 400            // 最小加减速时间,ms
 
 /*电流环指令滤波功能*/
 #define USE_CURRENT_LOOP_FILTER 1       // 使用电流环斜坡指令滤波0
