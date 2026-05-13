@@ -98,7 +98,9 @@ void foc_current_close_loop(ControllerStruct* controller) {
   controller->V_q = controller->IncPID_QAxis.OutPut;
 
   //弱磁
-  weak_magn_control(controller);
+  #if USE_WEAK_MAGN
+    weak_magn_control(controller);
+  #endif
 
   // uvw
   check_phases_overcurrent_timesliced(controller);
