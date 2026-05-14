@@ -65,6 +65,12 @@ void foc_position_close_loop(ControllerStruct* controller) {
       if (ff64 < -lim) ff64 = -lim;
       controller->velocity_ref += (int32_t)ff64;
     }
+    /* 总输出限幅: PID + FF 合计不超过 Pid_PositionLimit (PP/CSP 通用) */
+    {
+      int32_t lim = controller->FlashData.Pid_PositionLimit;
+      if (controller->velocity_ref >  lim) controller->velocity_ref =  lim;
+      if (controller->velocity_ref < -lim) controller->velocity_ref = -lim;
+    }
   } else {
     controller->position_ref = controller->real_position_out;
     controller->IncPID_Position.PidInit(&controller->IncPID_Position,

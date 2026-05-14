@@ -87,6 +87,15 @@ void    can_wly_set_node_id(uint8_t id);
 /* 获取发送失败计数 (调试用) */
 uint32_t can_wly_get_tx_fail_count(void);
 
+/* CAN RX 调试打印开关 (1=打印所有收到的帧到 USART1) */
+extern volatile uint8_t g_can_rx_debug;
+
+/* main 循环轮询: 打印 ISR 缓存的 RX 调试帧 */
+void can_wly_dbg_poll(void);
+
+/* cantest 调试模式: 置 1 强制关闭 CAN 超时看门狗 */
+extern uint8_t g_can_timeout_force_disable;
+
 /* 对外暴露的边界参数 (单位: rad / rad·s / N·m) */
 typedef struct {
     float pos_min, pos_max;   /* rad */

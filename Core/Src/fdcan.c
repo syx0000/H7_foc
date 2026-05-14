@@ -22,6 +22,7 @@
 
 /* USER CODE BEGIN 0 */
 #include <string.h>
+#include <stdio.h>
 /* USER CODE END 0 */
 
 FDCAN_HandleTypeDef hfdcan1;
@@ -149,8 +150,16 @@ void HAL_FDCAN_MspDeInit(FDCAN_HandleTypeDef* fdcanHandle)
 
 /* USER CODE BEGIN 1 */
 
+volatile uint8_t g_cantest_stub = 0;
+
 HAL_StatusTypeDef fdcan_send(uint32_t std_id, const uint8_t *data, uint32_t len)
 {
+    if (g_cantest_stub) {
+        printf("  [TX] ID=0x%03X len=%lu D=", (unsigned int)std_id, (unsigned long)len);
+        for (uint32_t i = 0; i < len; i++) printf("%02X ", data[i]);
+        printf("\r\n");
+        return HAL_OK;
+    }
     static const uint32_t dlc_table[] = {
         FDCAN_DLC_BYTES_0,  FDCAN_DLC_BYTES_1,  FDCAN_DLC_BYTES_2,  FDCAN_DLC_BYTES_3,
         FDCAN_DLC_BYTES_4,  FDCAN_DLC_BYTES_5,  FDCAN_DLC_BYTES_6,  FDCAN_DLC_BYTES_7,
@@ -198,7 +207,9 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
     while (HAL_FDCAN_GetRxFifoFillLevel(hfdcan, FDCAN_RX_FIFO0) > 0U) {
         if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx, rx_data) != HAL_OK) break;
-        uint32_t dlc_idx = (rx.DataLength >> 16) & 0x0F;
+        /* HAL 已对 DataLength 做过 >>16 处理 (见 stm32h7xx_hal_fdcan.c line 3084),
+           直接就是 0~15 的 DLC index, 不要再 shift */
+        uint32_t dlc_idx = rx.DataLength & 0x0F;
         fdcan_rx_user(rx.Identifier, rx_data, dlc_to_len[dlc_idx]);
     }
 }

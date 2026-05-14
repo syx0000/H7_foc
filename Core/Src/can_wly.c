@@ -11,12 +11,13 @@
 #include "ifly_fault_api.h"
 #include <string.h>
 #include <math.h>
+#include <stdio.h>
 
 /* ========== 内部状态 ========== */
 static uint8_t s_node_id = CAN_WLY_ID_DEFAULT;
 
 can_wly_limits_t g_can_wly_lim = {
-    .pos_min = -5.0f,  .pos_max = 5.0f,
+    .pos_min = -7.0f,  .pos_max = 7.0f,
     .spd_min = -20.0f, .spd_max = 20.0f,
     .tq_min  = -500.0f, .tq_max = 500.0f,
     .kp_min  = 0.0f,   .kp_max  = 500.0f,
@@ -35,6 +36,7 @@ static uint32_t s_tx_fail_count = 0;
 #define CAN_TIMEOUT_MS 200
 static volatile uint16_t s_can_timeout_cnt = 0;
 static uint8_t s_can_timeout_enabled = 0;
+uint8_t g_can_timeout_force_disable = 1;  /* 调试期间默认关闭, 联调时改回 0 */
 
 /* ========== 访问全局控制器 ========== */
 extern ControllerStruct controller_eyou;
@@ -85,12 +87,12 @@ static float pos_int_to_rad(int32_t pos_out) {
 static int32_t pos_rad_to_int(float rad) {
     return (int32_t)(rad / DEG_TO_RAD * 1024.0f);
 }
-/* 速度: 内部电机端 (rpm*1024*GR) -> 输出端 rad/s */
-static float vel_int_to_rad_s(int32_t vel_int) {
-    float rpm_out = (float)vel_int / (1024.0f * CAN_WLY_GR);
+/* 速度: dtheta_mech_out (输出端 rpm*1024, 不含GR) -> rad/s (反馈路径) */
+static float vel_out_to_rad_s(int32_t vel_out) {
+    float rpm_out = (float)vel_out / 1024.0f;
     return rpm_out * RPM_TO_RAD_S;
 }
-/* 速度: 输出端 rad/s -> 内部电机端 (rpm*1024*GR) */
+/* 速度: 输出端 rad/s -> velocity_ref (rpm*1024*GR) (指令路径) */
 static int32_t vel_rad_s_to_int(float rad_s) {
     float rpm_out = rad_s / RPM_TO_RAD_S;
     return (int32_t)(rpm_out * 1024.0f * CAN_WLY_GR);
@@ -116,7 +118,7 @@ static int32_t tq_nm_to_iq(float nm) {
  */
 static void pack_status_frame(uint8_t *d) {
     float pos_rad = pos_int_to_rad(controller_eyou.real_position_out);
-    float vel_rad_s = vel_int_to_rad_s(controller_eyou.dtheta_mech_out);
+    float vel_rad_s = vel_out_to_rad_s(controller_eyou.dtheta_mech_out);
     float tq_nm = tq_iq_to_nm(controller_eyou.I_q);
 
     uint32_t p_int = float_to_uint(pos_rad, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
@@ -201,7 +203,18 @@ static void handle_position_cmd(const uint8_t *data, uint32_t len) {
     float p_rad = uint_to_float(p_raw, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
     float v_rad_s = uint_to_float(v_raw, g_can_wly_lim.spd_min, g_can_wly_lim.spd_max, 16);
     controller_eyou.position_ref = pos_rad_to_int(p_rad);
-    controller_eyou.FlashData.Pid_PositionLimit = vel_rad_s_to_int(fabsf(v_rad_s));
+    /* 速度限制: 取 CAN 指令与 MaxSpeed(100rpm) 中较小值 */
+    {
+        int32_t can_lim = vel_rad_s_to_int(fabsf(v_rad_s));
+        int32_t ceiling = (int32_t)controller_eyou.FlashData.MaxSpeed;
+        int32_t eff_lim = (can_lim < ceiling) ? can_lim : ceiling;
+        controller_eyou.FlashData.Pid_PositionLimit = eff_lim;
+        /* 同步梯形规划 v_max: 内部单位 → output rpm → LSB/tick */
+        float rpm_out = (float)eff_lim / (1024.0f * CAN_WLY_GR);
+        float vmax_lsb_tick = rpm_out * (6.0f * 1024.0f / 2500.0f);
+        if (vmax_lsb_tick > 0.1f)
+            controller_eyou.SmoothPosRef.v_max = vmax_lsb_tick;
+    }
     controller_eyou.controller_mode = PROFILE_POSITION_MODE;
     send_status_frame();
 }
@@ -297,8 +310,22 @@ static uint8_t sdo_read_value(uint16_t idx, uint8_t subidx, uint8_t out[4]) {
 static uint8_t sdo_write_value(uint16_t idx, uint8_t subidx, const uint8_t *in) {
     (void)subidx;
     switch (idx) {
-    case CAN_WLY_OD_POS_MIN: g_can_wly_lim.pos_min = bytes_to_float_le(in); return 1;
-    case CAN_WLY_OD_POS_MAX: g_can_wly_lim.pos_max = bytes_to_float_le(in); return 1;
+    case CAN_WLY_OD_POS_MIN: {
+        g_can_wly_lim.pos_min = bytes_to_float_le(in);
+        const float rad_to_lsb = 180.0f * 1024.0f / (float)M_PI;
+        controller_eyou.FlashData.MinPositionLimit = (int32_t)(g_can_wly_lim.pos_min * rad_to_lsb);
+        controller_eyou.FlashData.PositionLimitFlag = 50;
+        controller_eyou.UserDataSaveFlag = 1;
+        return 1;
+    }
+    case CAN_WLY_OD_POS_MAX: {
+        g_can_wly_lim.pos_max = bytes_to_float_le(in);
+        const float rad_to_lsb = 180.0f * 1024.0f / (float)M_PI;
+        controller_eyou.FlashData.MaxPositionLimit = (int32_t)(g_can_wly_lim.pos_max * rad_to_lsb);
+        controller_eyou.FlashData.PositionLimitFlag = 50;
+        controller_eyou.UserDataSaveFlag = 1;
+        return 1;
+    }
     case CAN_WLY_OD_SPD_MIN: g_can_wly_lim.spd_min = bytes_to_float_le(in); return 1;
     case CAN_WLY_OD_SPD_MAX: g_can_wly_lim.spd_max = bytes_to_float_le(in); return 1;
     case CAN_WLY_OD_TQ_MIN:  g_can_wly_lim.tq_min  = bytes_to_float_le(in); return 1;
@@ -371,12 +398,19 @@ static void handle_ctrl_frame(const uint8_t *data, uint32_t len) {
     }
     switch (data[7]) {
     case CAN_WLY_CTRL_ENABLE:
-        controller_eyou.foc_run = 1;
+        controller_eyou.I_q_ref = 0;
+        controller_eyou.velocity_ref = 0;
+        controller_eyou.position_ref = controller_eyou.real_position_out;
+        controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
+        controller_eyou.foc_run = 2;
+        TIM1->CCER |= 0x0555u;
         break;
     case CAN_WLY_CTRL_DISABLE:
-        controller_eyou.foc_run = 0;
-        controller_eyou.velocity_ref = 0;
         controller_eyou.I_q_ref = 0;
+        controller_eyou.velocity_ref = 0;
+        controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
+        TIM1->CCER &= ~0x0555u;
+        controller_eyou.foc_run = 0;
         break;
     case CAN_WLY_CTRL_SET_ZERO:
         /* 将当前机械位置设为零点 */
@@ -394,7 +428,42 @@ static void handle_ctrl_frame(const uint8_t *data, uint32_t len) {
 }
 
 /* ========== 顶层 RX 分发 (覆盖 fdcan.c 的 weak 回调) ========== */
+static volatile uint32_t s_rx_frame_cnt = 0;
+volatile uint8_t g_can_rx_debug = 0;
+
+/* 环形缓冲: ISR 写, main 循环 print (避免在 ISR 里调 printf 死锁) */
+#define CAN_RX_DBG_BUF_SIZE 8
+typedef struct {
+    uint32_t id;
+    uint8_t  data[16];
+    uint8_t  len;
+} can_rx_dbg_entry_t;
+static volatile can_rx_dbg_entry_t s_rx_dbg_buf[CAN_RX_DBG_BUF_SIZE];
+static volatile uint8_t s_rx_dbg_wr = 0;
+static volatile uint8_t s_rx_dbg_rd = 0;
+
+void can_wly_dbg_poll(void) {
+    while (s_rx_dbg_rd != s_rx_dbg_wr) {
+        const can_rx_dbg_entry_t *e = (const can_rx_dbg_entry_t *)&s_rx_dbg_buf[s_rx_dbg_rd];
+        printf("[CAN RX] ID=0x%03X len=%u D=", (unsigned int)e->id, e->len);
+        for (uint8_t i = 0; i < e->len && i < 16; i++) printf("%02X ", e->data[i]);
+        printf("\r\n");
+        s_rx_dbg_rd = (s_rx_dbg_rd + 1) & (CAN_RX_DBG_BUF_SIZE - 1);
+    }
+}
+
 void fdcan_rx_user(uint32_t id, const uint8_t *data, uint32_t len) {
+    s_rx_frame_cnt++;
+    if (g_can_rx_debug) {
+        uint8_t next = (s_rx_dbg_wr + 1) & (CAN_RX_DBG_BUF_SIZE - 1);
+        if (next != s_rx_dbg_rd) {
+            s_rx_dbg_buf[s_rx_dbg_wr].id = id;
+            s_rx_dbg_buf[s_rx_dbg_wr].len = (uint8_t)((len > 16) ? 16 : len);
+            for (uint8_t i = 0; i < s_rx_dbg_buf[s_rx_dbg_wr].len; i++)
+                s_rx_dbg_buf[s_rx_dbg_wr].data[i] = data[i];
+            s_rx_dbg_wr = next;
+        }
+    }
     s_can_timeout_cnt = CAN_TIMEOUT_MS;
     if (!s_can_timeout_enabled) s_can_timeout_enabled = 1;
     /* 广播查询: 所有从站回 0x100+ID */
@@ -437,6 +506,12 @@ void can_wly_init(void) {
     } else {
         s_node_id = CAN_WLY_ID_DEFAULT;
     }
+
+    /* 上电同步: 协议位置量程 → Flash 软限位, 让 motorOverPosCheck 用同一套范围 */
+    const float rad_to_lsb = 180.0f * 1024.0f / (float)M_PI;
+    controller_eyou.FlashData.MinPositionLimit = (int32_t)(g_can_wly_lim.pos_min * rad_to_lsb);
+    controller_eyou.FlashData.MaxPositionLimit = (int32_t)(g_can_wly_lim.pos_max * rad_to_lsb);
+    controller_eyou.FlashData.PositionLimitFlag = 50;
 }
 
 uint8_t can_wly_get_node_id(void) { return s_node_id; }
@@ -450,7 +525,7 @@ uint32_t can_wly_get_tx_fail_count(void) { return s_tx_fail_count; }
 void can_wly_tick_1ms(void) {
     if (s_auto_report) send_status_frame();
 
-    if (s_can_timeout_enabled && s_can_timeout_cnt > 0) {
+    if (s_can_timeout_enabled && !g_can_timeout_force_disable && s_can_timeout_cnt > 0) {
         if (--s_can_timeout_cnt == 0) {
             controller_eyou.ServoErrFlag.Bit.CommunicateErr = 1;
         }

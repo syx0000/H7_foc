@@ -219,6 +219,9 @@ int main(void)
 		/* 调试串口命令解析 */
 		dbg_cmd_set();
 
+		/* CAN RX 调试帧异步打印 (canrxdbg 命令开启) */
+		can_wly_dbg_poll();
+
 		/* 非阻塞周期调用日志打印 */
 		static uint32_t log_tick = 0;
 		if (HAL_GetTick() - log_tick >= logPriodMs) {

@@ -43,6 +43,7 @@ void MX_FDCAN1_Init(void);
 /* USER CODE BEGIN Prototypes */
 HAL_StatusTypeDef fdcan_send(uint32_t std_id, const uint8_t *data, uint32_t len);
 void fdcan_rx_user(uint32_t id, const uint8_t *data, uint32_t len);
+extern volatile uint8_t g_cantest_stub;
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

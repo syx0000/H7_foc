@@ -19,6 +19,8 @@
 #include "adc.h"
 #include "encoder.h"
 #include "flash_port.h"
+#include "fdcan.h"
+#include "can_wly.h"
 #include "stm32h7xx_hal.h"
 #include <string.h>
 #include <stdlib.h>
@@ -353,7 +355,14 @@ void dbg_cmd_set(void) {
             controller_eyou.velocity_ref = Data * 1024 * 25;
         } else if (controller_eyou.controller_mode == PROFILE_POSITION_MODE ||
                    controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE) {
-            controller_eyou.position_ref = Data * 1024;
+            int32_t p_ref = Data * 1024;
+            if (controller_eyou.FlashData.PositionLimitFlag == 50) {
+                int32_t pmax = controller_eyou.FlashData.MaxPositionLimit;
+                int32_t pmin = controller_eyou.FlashData.MinPositionLimit;
+                if (p_ref > pmax) { p_ref = pmax; printf("  pos cmd clamped to MaxPos=%ld\r\n", (long)pmax); }
+                else if (p_ref < pmin) { p_ref = pmin; printf("  pos cmd clamped to MinPos=%ld\r\n", (long)pmin); }
+            }
+            controller_eyou.position_ref = p_ref;
         }
         printf("run mod_Target: %d, %d\r\n", controller_eyou.controller_mode, Data);
     }
@@ -367,17 +376,182 @@ void dbg_cmd_set(void) {
         int en = atoi(token);
 
         if (en) {
-            controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
             controller_eyou.I_q_ref = 0;
+            controller_eyou.velocity_ref = 0;
+            controller_eyou.position_ref = controller_eyou.real_position_out;
+            controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
             controller_eyou.foc_run = 2;
             TIM1->CCER |= 0x0555u;
             printf("PWM enabled, mode=Torque, I_q_ref=0 (CCER=0x%04X)\r\n", (unsigned int)TIM1->CCER);
         } else {
-            /* 失能 PWM 输出 + 停止 FOC */
+            controller_eyou.I_q_ref = 0;
+            controller_eyou.velocity_ref = 0;
+            controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
             TIM1->CCER &= ~0x0555u;
             controller_eyou.foc_run = 0;
             printf("PWM disabled, foc_run=0 (CCER=0x%04X)\r\n", (unsigned int)TIM1->CCER);
         }
+    }
+
+    /* canrxdbg<0/1>: 开启/关闭 CAN 收帧调试打印 */
+    if (NULL != strstr((char *)dbgRecvBuf, "canrxdbg")) {
+        loc = strstr((char *)dbgRecvBuf, "canrxdbg");
+        token = strtok(loc, "canrxdbg");
+        g_can_rx_debug = (uint8_t)atoi((char *)token);
+        printf("CAN RX debug: %s\r\n", g_can_rx_debug ? "ON" : "OFF");
+    }
+
+    /* canstat: 打印 FDCAN 状态 + 重置 TX FIFO (恢复 Bus-Off / FIFO 卡死) */
+    if (NULL != strstr((char *)dbgRecvBuf, "canstat")) {
+        FDCAN_ProtocolStatusTypeDef ps;
+        FDCAN_ErrorCountersTypeDef ec;
+        HAL_FDCAN_GetProtocolStatus(&hfdcan1, &ps);
+        HAL_FDCAN_GetErrorCounters(&hfdcan1, &ec);
+        uint32_t tx_free = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
+        printf("FDCAN: TxErr=%lu RxErr=%lu BusOff=%lu ErrPassive=%lu Warning=%lu\r\n",
+               (unsigned long)ec.TxErrorCnt, (unsigned long)ec.RxErrorCnt,
+               (unsigned long)ps.BusOff, (unsigned long)ps.ErrorPassive,
+               (unsigned long)ps.Warning);
+        printf("  LastErr=%lu DataLastErr=%lu Activity=%lu\r\n",
+               (unsigned long)ps.LastErrorCode, (unsigned long)ps.DataLastErrorCode,
+               (unsigned long)ps.Activity);
+        printf("  TxFifoFree=%lu/10  TxFailCnt=%lu  NodeID=%u  AutoReport=%u\r\n",
+               (unsigned long)tx_free,
+               (unsigned long)can_wly_get_tx_fail_count(),
+               can_wly_get_node_id(), 0);
+        /* 如果 BusOff 或 FIFO 满, 复位外设恢复 */
+        if (ps.BusOff || tx_free == 0) {
+            printf("  -> reset FDCAN peripheral\r\n");
+            HAL_FDCAN_Stop(&hfdcan1);
+            HAL_FDCAN_Start(&hfdcan1);
+            printf("  reset done\r\n");
+        }
+    }
+
+    /* cantest<N>: CAN 协议单元自测 (不接总线, 模拟收帧 → 打印内部状态) */
+    if (NULL != strstr((char *)dbgRecvBuf, "cantest")) {
+        loc = strstr((char *)dbgRecvBuf, "cantest");
+        token = strtok(loc, "cantest");
+        int tc = atoi((char *)token);
+        printf("=== cantest%d ===\r\n", tc);
+        g_cantest_stub = 1;
+
+        switch (tc) {
+        case 1: {
+            /* 0x200 速度指令: v_raw=36205(=20rpm output), ID=1 */
+            uint8_t d[] = {0x6D, 0x8D, 0x01};
+            printf("  [RX] ID=0x200 D=6D 8D 01 (v_raw=36205 -> 20rpm, ID=1)\r\n");
+            fdcan_rx_user(0x200, d, sizeof(d));
+            float v_rad_s = (float)controller_eyou.velocity_ref / (1024.0f * 25.0f) * (2.0f * 3.14159265f / 60.0f);
+            printf("  velocity_ref=%d (internal)\r\n", (int)controller_eyou.velocity_ref);
+            printf("  -> output rad/s=%.4f (expect ~2.0944)\r\n", v_rad_s);
+            printf("  mode=%d (expect %d=PROFILE_VELOCITY)\r\n",
+                   controller_eyou.controller_mode, PROFILE_VELOCITY_MOCE);
+            break;
+        }
+        case 2: {
+            /* 0x400 位置指令: p_raw=中点(0x800000), v_raw=0x8000, ID=1 */
+            uint8_t d[] = {0x00, 0x00, 0x80, 0x00, 0x80, 0x01};
+            uint32_t p_raw = 0x800000;
+            uint16_t v_raw = 0x8000;
+            printf("  [RX] ID=0x400 D=00 00 80 00 80 01 (p_raw=0x%06X, v_raw=0x%04X, ID=1)\r\n",
+                   (unsigned int)p_raw, (unsigned int)v_raw);
+            fdcan_rx_user(0x400, d, sizeof(d));
+            printf("  position_ref=%d (1deg/1024 LSB)\r\n", (int)controller_eyou.position_ref);
+            printf("  Pid_PositionLimit=%d\r\n", (int)controller_eyou.FlashData.Pid_PositionLimit);
+            printf("  mode=%d (expect %d=PROFILE_POSITION)\r\n",
+                   controller_eyou.controller_mode, PROFILE_POSITION_MODE);
+            break;
+        }
+        case 3: {
+            /* 直接调 pack_status_frame 打印 12 字节 → 验证速度刻度疑点 */
+            printf("  Current state: pos_out=%d, dtheta_mech_out=%d, I_q=%d\r\n",
+                   (int)controller_eyou.real_position_out,
+                   (int)controller_eyou.dtheta_mech_out,
+                   (int)controller_eyou.I_q);
+            /* 触发状态帧发送 (stub 模式会打印 hex) */
+            fdcan_rx_user(0x080, NULL, 0);
+            printf("  [Decode hint] pos: float_to_uint(pos_rad, %.1f, %.1f, 24)\r\n",
+                   g_can_wly_lim.pos_min, g_can_wly_lim.pos_max);
+            printf("  [Decode hint] vel: float_to_uint(vel_rad_s, %.1f, %.1f, 16)\r\n",
+                   g_can_wly_lim.spd_min, g_can_wly_lim.spd_max);
+            break;
+        }
+        case 4: {
+            /* SDO 读 0x2000 (pos_min) */
+            uint8_t d[] = {0x40, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00};
+            printf("  [RX] ID=0x601 SDO Read idx=0x2000 (pos_min)\r\n");
+            fdcan_rx_user(0x600 + can_wly_get_node_id(), d, 8);
+            printf("  expect: pos_min=%.3f rad\r\n", g_can_wly_lim.pos_min);
+            break;
+        }
+        case 5: {
+            /* SDO 写 0x2000 (pos_min = -10.0f) */
+            union { float f; uint8_t b[4]; } cv;
+            cv.f = -10.0f;
+            uint8_t d[] = {0x23, 0x00, 0x20, 0x00, cv.b[0], cv.b[1], cv.b[2], cv.b[3]};
+            printf("  [RX] ID=0x601 SDO Write idx=0x2000 val=-10.0f\r\n");
+            float old_val = g_can_wly_lim.pos_min;
+            fdcan_rx_user(0x600 + can_wly_get_node_id(), d, 8);
+            printf("  pos_min: %.3f -> %.3f (expect -10.000)\r\n", old_val, g_can_wly_lim.pos_min);
+            /* 恢复原值 */
+            g_can_wly_lim.pos_min = old_val;
+            printf("  (restored to %.3f)\r\n", g_can_wly_lim.pos_min);
+            break;
+        }
+        case 6: {
+            /* 0x701 控制帧使能: D[0..6]=0xFF, D[7]=0xFA */
+            uint8_t d[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFA};
+            uint8_t old_run = controller_eyou.foc_run;
+            printf("  [RX] ID=0x701 CTRL_ENABLE (D[7]=0xFA)\r\n");
+            fdcan_rx_user(0x700 + can_wly_get_node_id(), d, 8);
+            printf("  foc_run: %d -> %d (expect 1)\r\n", old_run, controller_eyou.foc_run);
+            controller_eyou.foc_run = old_run;
+            printf("  (restored foc_run=%d)\r\n", controller_eyou.foc_run);
+            break;
+        }
+        case 7: {
+            /* 超时保护测试: 注入一帧激活看门狗, 然后等 250ms 看 CommunicateErr */
+            uint8_t d[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD};
+            printf("  [RX] ID=0x701 CLR_ERR -> activate timeout watchdog\r\n");
+            controller_eyou.ServoErrFlag.All_Flag = 0;
+            fdcan_rx_user(0x700 + can_wly_get_node_id(), d, 8);
+            printf("  Watchdog armed. Waiting 250ms (no frames)...\r\n");
+            g_cantest_stub = 0;
+            for (int i = 0; i < 250; i++) {
+                HAL_Delay(1);
+                can_wly_tick_1ms();
+            }
+            g_cantest_stub = 1;
+            printf("  CommunicateErr=%d (expect 1)\r\n",
+                   (int)controller_eyou.ServoErrFlag.Bit.CommunicateErr);
+            controller_eyou.ServoErrFlag.All_Flag = 0;
+            break;
+        }
+        case 8: {
+            /* 0x500 MIT 指令: 12 字节 */
+            /* p_raw=中点, v_raw=中点, t_raw=中点, kp_raw=0x4000, kd_raw=0x4000, ID=1 */
+            uint8_t d[] = {0x00, 0x00, 0x80,   /* POS[23:0] = 0x800000 */
+                           0x00, 0x80,          /* VEL[15:0] = 0x8000 */
+                           0x00, 0x80,          /* T[15:0]   = 0x8000 */
+                           0x00, 0x40,          /* Kp[15:0]  = 0x4000 */
+                           0x00, 0x40,          /* Kd[15:0]  = 0x4000 */
+                           0x01};               /* CANID     = 1 */
+            printf("  [RX] ID=0x500 MIT 12B: p=mid, v=mid, t=mid, Kp=0x4000, Kd=0x4000\r\n");
+            fdcan_rx_user(0x500, d, 12);
+            printf("  position_ref=%d, I_q_ref=%d\r\n",
+                   (int)controller_eyou.position_ref, (int)controller_eyou.I_q_ref);
+            printf("  mode=%d (expect %d=CSP)\r\n",
+                   controller_eyou.controller_mode, CYCLIC_SYNC_POSITION_MODE);
+            printf("  NOTE: Kp/Kd discarded in current impl (see疑点#4)\r\n");
+            break;
+        }
+        default:
+            printf("  Unknown cantest%d (valid: 1-8)\r\n", tc);
+            break;
+        }
+        g_cantest_stub = 0;
+        printf("=== cantest%d done ===\r\n", tc);
     }
 
     memset((uint8_t *)dbgRecvBuf, 0, usart_rx_len);
