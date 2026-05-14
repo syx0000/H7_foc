@@ -253,44 +253,127 @@ static void print_fault_types(Servo_Flag_Unin flag) {
 }
 
 /*******************************************************************************
+ * 故障分级 - 根据严重程度选择停机方式
+ * 严重故障（硬件损坏风险）：立即关 PWM
+ * 一般故障（无即时硬件风险）：斜坡减速后再关 PWM，缓解反电动势浪涌
+ ******************************************************************************/
+static uint32_t get_critical_fault_mask(void) {
+    /* 严重故障位掩码 - 必须立即关 PWM 防止硬件损坏 */
+    Servo_Flag_Unin mask;
+    mask.All_Flag = 0;
+    mask.Bit.OverBusVolErr     = 1;  /* 母线过压：再开 PWM 会损坏 */
+    mask.Bit.OverBusCurrentErr = 1;  /* 过流：MOSFET 烧毁风险 */
+    mask.Bit.HighBoardTempErr  = 1;  /* 板过温：MOSFET 结温危险 */
+    mask.Bit.HighMotorTempErr  = 1;  /* 电机过温 */
+    mask.Bit.DriverChipNfault  = 1;  /* DRV 硬件故障 */
+    mask.Bit.MosFault          = 1;  /* MOSFET 故障 */
+    mask.Bit.PhaseCurrentSampleErr = 1;  /* 电流采样错 */
+    return mask.All_Flag;
+}
+
+/*******************************************************************************
+ * fault_safe_shutdown - 安全关 PWM
+ * 中点占空比 → 关 MOE → 清 CCER
+ ******************************************************************************/
+static void fault_safe_shutdown(void) {
+    uint32_t period = TIM1->ARR;
+    TIM1->CCR1 = period / 2;
+    TIM1->CCR2 = period / 2;
+    TIM1->CCR3 = period / 2;
+    __DSB();
+    TIM1->BDTR &= ~TIM_BDTR_MOE;
+    TIM1->CCER &= ~0x1555u;
+}
+
+/*******************************************************************************
+ * fault_clear_run_data - 清理运行数据
+ ******************************************************************************/
+static void fault_clear_run_data(void) {
+    controller_eyou.velocity_ref          = 0;
+    controller_eyou.velocity_ref_filterd  = 0;
+    controller_eyou.position_ref          = 0;
+    controller_eyou.position_ref_filterd  = 0;
+    controller_eyou.I_q_ref               = 0;
+    controller_eyou.I_d_ref               = 0;
+    controller_eyou.SpeedSmooth.NowVelocityRef = 0;
+    ResetControlData(&controller_eyou);
+    clear_all_fault_counters();
+}
+
+/*******************************************************************************
  * CheckAndHandleAllFaultBits - 故障总分发：扫描所有故障位，触发时停机
  * 仅在错误码变化时上报，避免反复打印同一错误
+ *
+ * 停机策略（分级）：
+ * - 严重故障（OVP/OC/OT/MOSFault）：立即关 PWM，防止硬件损坏
+ * - 一般故障：先斜坡减速 100ms（I_q_ref 渐变到 0），再关 PWM
+ *   缓解反电动势浪涌，保护母线电容和 MOSFET
  ******************************************************************************/
 uint8_t CheckAndHandleAllFaultBits(void) {
     static uint32_t last_fault_flag = 0;
+    static uint8_t  ramp_down_phase = 0;       /* 0=正常, 1=斜坡减速中 */
+    static uint16_t ramp_down_ticks = 0;       /* 减速计数（ms） */
+    static int32_t  ramp_down_iq_start = 0;    /* 进入减速时的 I_q_ref */
+    const uint16_t  RAMP_DOWN_MS = 100;        /* 斜坡时间 100ms */
+
     uint32_t current_fault = controller_eyou.ServoErrFlag.All_Flag;
 
     if (current_fault == 0) {
         last_fault_flag = 0;
+        ramp_down_phase = 0;
+        ramp_down_ticks = 0;
         return 0;
     }
 
-    /* 仅在错误码变化时上报 */
-    if (current_fault != last_fault_flag) {
-        controller_eyou.foc_run = 0;
-        /* 关闭 PWM 输出 */
-        TIM1->CCER &= ~0x0555u;
+    /* 斜坡减速进行中：每次调用（1ms）线性减小 I_q_ref */
+    if (ramp_down_phase == 1) {
+        ramp_down_ticks++;
+        if (ramp_down_ticks >= RAMP_DOWN_MS) {
+            /* 减速完成，关 PWM */
+            controller_eyou.foc_run = 0;
+            fault_safe_shutdown();
+            fault_clear_run_data();
+            printf("Ramp-down done, PWM disabled\r\n");
+            printf("====================================\r\n");
+            ramp_down_phase = 0;
+            return 1;
+        }
+        /* 线性递减 I_q_ref */
+        controller_eyou.I_q_ref =
+            ramp_down_iq_start * (RAMP_DOWN_MS - ramp_down_ticks) / RAMP_DOWN_MS;
+        controller_eyou.velocity_ref = 0;
+        controller_eyou.position_ref = 0;
+        return 1;
+    }
 
-        /* 清理运行数据：指令 / 斜坡 / PID 累积 */
-        controller_eyou.velocity_ref          = 0;
-        controller_eyou.velocity_ref_filterd  = 0;
-        controller_eyou.position_ref          = 0;
-        controller_eyou.position_ref_filterd  = 0;
-        controller_eyou.I_q_ref               = 0;
-        controller_eyou.I_d_ref               = 0;
-        controller_eyou.SpeedSmooth.NowVelocityRef = 0;
-        /* 重置 PID 累积（重新初始化 IncPID_DAxis/QAxis/Speed/Position） */
-        ResetControlData(&controller_eyou);
-        /* 清除所有故障检测计数器 */
-        clear_all_fault_counters();
+    /* 仅在错误码变化时进入新故障处理 */
+    if (current_fault != last_fault_flag) {
+        uint32_t critical_mask = get_critical_fault_mask();
+        uint8_t  is_critical   = (current_fault & critical_mask) != 0;
 
         printf("\r\n========== FAULT DETECTED ==========\r\n");
-        printf("ServoErrFlag = 0x%08lX (prev: 0x%08lX)\r\n",
+        printf("ServoErrFlag = 0x%08lX (prev: 0x%08lX) %s\r\n",
                (unsigned long)current_fault,
-               (unsigned long)last_fault_flag);
+               (unsigned long)last_fault_flag,
+               is_critical ? "[CRITICAL]" : "[NORMAL]");
         print_fault_types(controller_eyou.ServoErrFlag);
-        printf("PWM disabled, foc_run = 0, run data cleared\r\n");
-        printf("====================================\r\n");
+
+        if (is_critical) {
+            /* 严重故障：立即关 PWM */
+            controller_eyou.foc_run = 0;
+            fault_safe_shutdown();
+            fault_clear_run_data();
+            printf("CRITICAL fault, PWM immediately disabled\r\n");
+            printf("====================================\r\n");
+        } else {
+            /* 一般故障：进入斜坡减速 */
+            ramp_down_phase = 1;
+            ramp_down_ticks = 0;
+            ramp_down_iq_start = controller_eyou.I_q_ref;
+            printf("Normal fault, ramp-down %ums (I_q_ref=%ld -> 0)\r\n",
+                   RAMP_DOWN_MS, (long)ramp_down_iq_start);
+            /* 不立即关 PWM，让电流环继续工作 */
+        }
 
         last_fault_flag = current_fault;
     }
