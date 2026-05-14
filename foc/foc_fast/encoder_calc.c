@@ -16,23 +16,15 @@ extern ControllerStruct controller_eyou;
 #define SPEED_SHIFT_DIV 16384.0f
 
 /* 获取电机端角度原始值（outer，24位）
-   InvertDirflag=1 时镜像（ENCODER_BIT - raw），与 pwm_ccr_set / phase_current_sample
-   的 U/V 相序交换保持一致；否则反向运行时 elec_offest_1 公式相当于差一个相位补偿，
-   导致 q 轴施力大部分落到 d 轴上、转子静止 */
+   相序差异由 set_phase_voltage / phase_current_sample 的 B/C 交换吸收，
+   这里不再做编码器镜像，与 motor_h7_0426 的 order_phases 方案对齐 */
 static inline uint32_t get_motor_angle_raw(DPT_Angles *a) {
     DPT_GetLatestAngles_ISR(a);
-    if (controller_eyou.FlashData.InvertDirflag == 1) {
-        return ENCODER_BIT - a->outer_raw;
-    }
     return a->outer_raw;
 }
 
-/* 获取输出端角度原始值（inner，24位）
-   同理：InvertDirflag=1 时镜像，让位置环在两个方向上都自洽 */
+/* 获取输出端角度原始值（inner，24位） */
 static inline uint32_t get_output_angle_raw(DPT_Angles *a) {
-    if (controller_eyou.FlashData.InvertDirflag == 1) {
-        return ENCODER_BIT_OUT - a->inner_raw;
-    }
     return a->inner_raw;
 }
 
@@ -56,11 +48,7 @@ void Encoder_data_Calculate(ControllerStruct* controller, uint16_t hz) {
     controller->theta_elec_raw = (uint16_t)(((NPP * temp) % ENCODER_BIT) >> ENCODER_16BIT_DIV);
     /* 辨识模式下 theta_elec 由辨识函数显式控制（例如钉死 0），此处不覆盖 */
     if (!controller->ident_test.enable) {
-        if (controller->FlashData.InvertDirflag != 1) {
-            controller->theta_elec = controller->theta_elec_raw - controller->FlashData.elec_offest_0;
-        } else {
-            controller->theta_elec = controller->theta_elec_raw - controller->FlashData.elec_offest_1;
-        }
+        controller->theta_elec = controller->theta_elec_raw - controller->FlashData.elec_offset;
         if (controller->theta_elec < 0) {
             controller->theta_elec += 65536;
         } else if (controller->theta_elec > 65536) {
@@ -195,11 +183,19 @@ void Encoder_out_data_Calculate(ControllerStruct* controller, uint16_t hz) {
         (int32_t)(((uint64_t)temp * 360) >> ENCODER_10BIT_DIV) +
         (controller->circle_count_out * 360 << 10);
 
-    /* 位置跳变保护 */
+    /* 位置跳变保护：连续多次跳变则强制同步，避免卡死 */
+    static uint8_t jump_cnt = 0;
     if (abs(real_position_out_temp - controller->real_position_out_pre) > 1024) {
-        controller->real_position_out = controller->real_position_out_pre;
+        if (++jump_cnt >= 10) {
+            controller->real_position_out = real_position_out_temp;
+            controller->real_position_out_pre = real_position_out_temp;
+            jump_cnt = 0;
+        } else {
+            controller->real_position_out = controller->real_position_out_pre;
+        }
     } else {
         controller->real_position_out = real_position_out_temp;
+        jump_cnt = 0;
     }
 
     /* 速度：(real_position_out - pre) * hz * 减速比 25 / 6   (/6 = *60/360) */

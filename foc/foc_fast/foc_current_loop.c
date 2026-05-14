@@ -270,33 +270,22 @@ float sliding_avg_filter(float *buf, uint8_t depth, uint8_t *idx, float new_val,
     :
 ********************************************************************************/
 uint8_t phase_current_sample(ControllerStruct* controller) {
-  // Ia Ib Ic
-#if CHANGE_PHASE_ORDER_UV
-  if (controller->FlashData.InvertDirflag == 1) {
-    controller->I_a = (int32_t)(controller->Ib_raw - controller->FlashData.Ib_offset) * CURRENT_TRANS_NUMERATOR /
-        CURRENT_TRANS_DENOMINATOR;    // 6831A11/683=0.00146A  3.0A=3.0*683=20494096.
-    controller->I_b = (int32_t)(controller->Ia_raw - controller->FlashData.Ia_offset) * CURRENT_TRANS_NUMERATOR /
-        CURRENT_TRANS_DENOMINATOR;    // 10241A/1024
+  /* PhaseOrder 镜像：NEGATIVE 下 PWM 已交换 B/C，ADC B 通道物理对应 C 相，
+     所以把 Ib_raw 解释为 I_c，再用 KCL 反推 I_b = -I_a - I_c。
+     与 set_phase_voltage 的 B/C 交换对称，整体效果 = Iβ→-Iβ。 */
+  if (controller->FlashData.PhaseOrder == PHASE_ORDER_POSITIVE) {
+    controller->I_a = (int32_t)(controller->Ia_raw - controller->FlashData.Ia_offset) * CURRENT_TRANS_NUMERATOR /
+        CURRENT_TRANS_DENOMINATOR;
+    controller->I_b = (int32_t)(controller->Ib_raw - controller->FlashData.Ib_offset) * CURRENT_TRANS_NUMERATOR /
+        CURRENT_TRANS_DENOMINATOR;
+    controller->I_c = (int32_t)(-controller->I_b - controller->I_a);
   } else {
     controller->I_a = (int32_t)(controller->Ia_raw - controller->FlashData.Ia_offset) * CURRENT_TRANS_NUMERATOR /
-        CURRENT_TRANS_DENOMINATOR;    // Q10  6831A11/683=0.00146A  3.0A=3.0*683=20494096.
-    controller->I_b = (int32_t)(controller->Ib_raw - controller->FlashData.Ib_offset) * CURRENT_TRANS_NUMERATOR /
-        CURRENT_TRANS_DENOMINATOR;    // 10241/1024 A
+        CURRENT_TRANS_DENOMINATOR;
+    controller->I_c = (int32_t)(controller->Ib_raw - controller->FlashData.Ib_offset) * CURRENT_TRANS_NUMERATOR /
+        CURRENT_TRANS_DENOMINATOR;
+    controller->I_b = (int32_t)(-controller->I_a - controller->I_c);
   }
-#else
-  if (controller->FlashData.InvertDirflag == 1) {
-    controller->I_a = (int32_t)(controller->Ia_raw - controller->FlashData.Ia_offset) * CURRENT_TRANS_NUMERATOR /
-        CURRENT_TRANS_DENOMINATOR;    // Q10  6831A11/683=0.00146A  3.0A=3.0*683=20494096.
-    controller->I_b = (int32_t)(controller->Ib_raw - controller->FlashData.Ib_offset) * CURRENT_TRANS_NUMERATOR /
-        CURRENT_TRANS_DENOMINATOR;    // 10241/1024 A
-  } else {
-    controller->I_a = (int32_t)(controller->Ib_raw - controller->FlashData.Ib_offset) * CURRENT_TRANS_NUMERATOR /
-        CURRENT_TRANS_DENOMINATOR;    // 6831A11/683=0.00146A  3.0A=3.0*683=20494096.
-    controller->I_b = (int32_t)(controller->Ia_raw - controller->FlashData.Ia_offset) * CURRENT_TRANS_NUMERATOR /
-        CURRENT_TRANS_DENOMINATOR;    // 10241A/1024
-  }
-#endif
-  controller->I_c = (int32_t)(-controller->I_b - controller->I_a);
 
   return 0;
 }

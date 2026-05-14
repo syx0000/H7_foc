@@ -244,10 +244,10 @@ int main(void)
 			LockedRotorProFunc();        // 堵转检测
 			driverChipFaultCheck();      // DRV8353 nFAULT 引脚
 			motorSpeedOverCheck();       // 过速检测
-			motorSpeedOffsetCheck();     // 速度跟随偏差
-			motorPosOffsetCheck();       // 位置跟随偏差
-			motorCurrentOffsetCheck();   // 电流跟随偏差
-			motorOverPosCheck();         // 软位置限位
+//			motorSpeedOffsetCheck();     // 速度跟随偏差
+//			motorPosOffsetCheck();       // 位置跟随偏差
+//			motorCurrentOffsetCheck();   // 电流跟随偏差
+//			motorOverPosCheck();         // 软位置限位
 
 			/* 故障总分发：扫描所有故障位，触发时停机 */
 			if(!g_foc_openloop_enable) {

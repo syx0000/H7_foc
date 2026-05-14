@@ -21,8 +21,6 @@
 /* Runtime-controllable serial debug flag (0=off, 1=on). Replaces compile-time macro USART_CONTROL. */
 extern volatile uint8_t USART_CONTROL;
 #define USE_RTOS_LOG_PRINT 0       // RTOS的log打印功能
-#define CHANGE_PHASE_ORDER_UV 1    // 调换U V相序；
-                                   //当电机相序从UVW变为VUW时，电机的电角度相对于机械角度发生120°的相位偏移，因为每相之间的电角度差从120°变为-120°
 #define USEFOC_OPEN_TEST 0         // 使用FOC开环测试
 #define USE_DMA_SEND 0             // 使用dma发送
 #define CIA_402_AXIS               // 使用CIA的轴宏
@@ -59,9 +57,9 @@ extern volatile uint8_t USART_CONTROL;
 #define DEFAULT_STO_2_PROTECT_KEY 10           // 20开  10关
 #define DEFAULT_LOCKED_MOTOR_PROTECT_KEY 10    // 20开  10关
 
-/*电机同方向旋转*/
-#define MOTOR_DIRECT_SAME 1     // 电机正向定义：1=正向，-1=反向（根据硬件接线调整）
-#define MOTOR_DIRECT_SAME_F 1   //1默认参数使用宏定义，0默认参数使用flash值
+/*相序定义（编码器与电机机械方向）：开机自动辨识，落 Flash 持久化*/
+#define PHASE_ORDER_POSITIVE 1   // 编码器与电机同向（默认接线）
+#define PHASE_ORDER_NEGATIVE 0   // 编码器与电机反向（B/C 相需要交换）
 /*抱闸延时时间默认值*/
 #define BRAKE_TIME 500
 
@@ -86,7 +84,7 @@ extern volatile uint8_t USART_CONTROL;
 #define FLASH_DATA_IS_UPDATA_FLAG 60
 #define ELEC_ANGLE_ESTIMATE_FAILED 70                          // 上一次电角度辨识失败
 #define MECH_OFFSET_ANGLE_IS_UPDATA_FLAG ((uint16_t)0x0064)    // 用户定义零点
-#define FLASH_STRUCT_VERSION 3                                 // FlashSavedData 结构体版本（增加 MotorParamFlag）
+#define FLASH_STRUCT_VERSION 4                                 // FlashSavedData 结构体版本（PhaseOrder 取代 InvertDirflag, elec_offset 单值）
 
 #define LOCKED_MOTOR_CURRENT (15 * 1024)                       // 10A
 #define DE_LOCKED_CURRENT (LOCKED_MOTOR_CURRENT / 6)
@@ -384,8 +382,8 @@ typedef struct {
   uint16_t Ic_offset;
 
   uint16_t AngleOffsetFlag;    // 00||FF为无 其余为有
-  uint16_t elec_offest_0;      // 电气角度偏移 停机设定,方向-1
-  uint16_t elec_offest_1;      // 电气角度偏移 停机设定，方向1
+  uint16_t elec_offset;        // 电气角度偏移（单一值，PhaseOrder 确定后只校准一次）
+  uint16_t PhaseOrder;         // 相序：1=POSITIVE（不交换），0=NEGATIVE（B/C 交换）
   int32_t mech_offest;         // 机械角度偏移 停机设定，立即生效
   int32_t temp1;               // 预留成员1
   int32_t temp2;               // 预留成员2
@@ -429,7 +427,6 @@ typedef struct {
   uint16_t BusVolProteckKey;        // 10关 20开
   uint16_t LockedRotorProtectKey;
 
-  int8_t InvertDirflag;             // 电机正反转方向
   uint16_t brake_time;              // 抱闸延时时间
   __IO int32_t mech_offest_out;     // 输出端偏移值
   uint32_t stoStateFlag;            // STO标志位，0-sto不启用，1-stoa启用，2-stob启用，3-stoab启用

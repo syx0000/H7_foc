@@ -112,10 +112,10 @@ uint8_t InitFlashData(ControllerStruct* controller) {
         Temp = 0xFF;
     }
 
-    printf("Flash: InvertDirflag=%d, mech_offest_out=%d, elec_offest_0/1=%d/%d\r\n",
-           controller->FlashData.InvertDirflag,
+    printf("Flash: PhaseOrder=%u, mech_offest_out=%d, elec_offset=%u\r\n",
+           (unsigned)controller->FlashData.PhaseOrder,
            (int)controller->FlashData.mech_offest_out,
-           controller->FlashData.elec_offest_0, controller->FlashData.elec_offest_1);
+           (unsigned)controller->FlashData.elec_offset);
 
     /* 3. 电流零偏：未校准或为空时重新获取 */
     if ((controller->FlashData.CurrentFlag == 0xFFFF) ||
@@ -201,10 +201,6 @@ uint8_t InitFlashData(ControllerStruct* controller) {
     printf("Flash: MaxPosLim=%d, MinPosLim=%d\r\n",
            (int)controller->FlashData.MaxPositionLimit,
            (int)controller->FlashData.MinPositionLimit);
-
-#if MOTOR_DIRECT_SAME_F
-    controller->FlashData.InvertDirflag = MOTOR_DIRECT_SAME;
-#endif
 
     MAX_CURRENT_PRE = controller->FlashData.MaxCurrent;
 
@@ -296,77 +292,65 @@ uint8_t FlashLimit_Check(Portection_Value* Threshold_buffer) {
     return 0;
 }
 
+/* PHU 风格四点开环定位（只校准一个方向）：
+   1. 先用 POSITIVE 模式跑四点（0°/90°/180°/270° 电角度），判断编码器方向 → 定 PhaseOrder
+   2. 用确定后的 PhaseOrder 再跑一次四点，取第一个点的编码器值算 elec_offset
+   这样 elec_offset 和运行时的 PhaseOrder 严格对应，不会有坐标系不一致的问题 */
 void ElecAngleEstimate(ControllerStruct* controller) {
-    uint16_t theta_open[4]   = {0, 16383, 32767, 49151};  // 0° 90° 180° 270°
-    int16_t v_d              = 2048;                      // 2V d轴电压（提高驱动力）
-    int16_t v_q              = 0;
+    uint16_t theta_open[4] = {0, 16383, 32767, 49151};  // 0° 90° 180° 270° 电角度
+    int16_t v_d            = 2048;                       // 2V d轴电压
+    int16_t v_q            = 0;
     uint32_t TempPosition[4] = {0};
     int16_t i;
     uint8_t dir = 0;
-    int32_t TempElecAngle;
     uint8_t ErrTemp = 0;
 
-    int8_t InvertDirflag_pre = controller->FlashData.InvertDirflag;
-
-    /* 第一轮：InvertDirflag = -1（正向） */
-    controller->FlashData.InvertDirflag = -1;
+    /* === 第一轮：用 POSITIVE 模式跑四点，判断编码器方向 === */
+    controller->FlashData.PhaseOrder = PHASE_ORDER_POSITIVE;
     for (i = 0; i < 4; i++) {
         set_phase_voltage(controller, v_d, v_q, theta_open[i]);
-        HAL_Delay(1200);  // 等电机转到位
+        HAL_Delay(1200);
 
         DPT_Angles angles;
         DPT_GetLatestAngles(&angles);
-        TempPosition[i] = angles.outer_raw;  // 电机端编码器（高速端）
-        printf("-1: %d (%.2f deg)\r\n", (int)TempPosition[i],
+        TempPosition[i] = angles.outer_raw;
+        printf("scan[%d]: %u (%.2f deg)\r\n", i, (unsigned)TempPosition[i],
                TempPosition[i] * 360.0f / ENCODER_BIT);
     }
-
     set_phase_voltage(controller, 0, 0, 0);
 
-    /* 检查转动幅度和方向（归一化差值处理跨圈） */
+    /* 检查方向：相邻差值归一化后 > 0 为正向 */
     dir = 0;
     for (i = 0; i < 3; i++) {
         int32_t temp = TempPosition[i + 1] - TempPosition[i];
+        if (temp > (int32_t)(ENCODER_BIT / 2))       temp -= ENCODER_BIT;
+        else if (temp < -(int32_t)(ENCODER_BIT / 2)) temp += ENCODER_BIT;
 
-        /* 归一化到 [-ENCODER_BIT/2, ENCODER_BIT/2]，正确处理跨圈 */
-        int32_t temp_norm = temp;
-        if (temp > (int32_t)(ENCODER_BIT / 2))
-            temp_norm -= ENCODER_BIT;
-        else if (temp < -(int32_t)(ENCODER_BIT / 2))
-            temp_norm += ENCODER_BIT;
+        printf("  delta[%d]: %.2f deg\r\n", i, temp * 360.0f / ENCODER_BIT);
 
-        printf("temp = %.2f deg (norm: %.2f deg)\r\n",
-               temp * 360.0f / ENCODER_BIT,
-               temp_norm * 360.0f / ENCODER_BIT);
-
-        if (ABS(temp_norm) < (ENCODER_BIT / (NPP * 4 * 2)))  // 转角过小
+        if (ABS(temp) < (ENCODER_BIT / (NPP * 4 * 2)))
             ErrTemp++;
-
-        if (temp_norm > 0)
-            dir = 1;  // 归一化后正值 = 正向
+        if (temp > 0)
+            dir++;
     }
 
     if (ErrTemp >= 1) {
         controller->ServoErrFlag.Bit.LockedRotorErr = 1;
-        controller->FlashData.AngleOffsetFlag       = ELEC_ANGLE_ESTIMATE_FAILED;
-        printf("Elec Angle Offset Estimate Fail (locked rotor)\r\n");
-    }
-
-    if (dir)
-        TempElecAngle = (uint16_t)(((NPP * TempPosition[0]) % ENCODER_BIT) >> ENCODER_16BIT_DIV);
-    else {
-        TempElecAngle = (uint16_t)((((NPP * TempPosition[0]) % ENCODER_BIT) >> ENCODER_16BIT_DIV) - 32767);
-        controller->ServoErrFlag.Bit.PhaseOrderErr = 1;
         controller->FlashData.AngleOffsetFlag = ELEC_ANGLE_ESTIMATE_FAILED;
-        printf("Elec Angle Offset Estimate Fail (wrong phase order)\r\n");
+        printf("ElecAngle FAIL: locked rotor\r\n");
+        return;
     }
 
-    controller->FlashData.elec_offest_0 = TempElecAngle;
-    printf("elec_offest_0 = %d\r\n", controller->FlashData.elec_offest_0);
-    controller->FlashData.mech_offest = TempPosition[3] * 360 >> ENCODER_10BIT_DIV;
+    /* 多数差值 > 0 → POSITIVE，否则 NEGATIVE */
+    if (dir >= 2) {
+        controller->FlashData.PhaseOrder = PHASE_ORDER_POSITIVE;
+        printf("PhaseOrder = POSITIVE\r\n");
+    } else {
+        controller->FlashData.PhaseOrder = PHASE_ORDER_NEGATIVE;
+        printf("PhaseOrder = NEGATIVE (swap B/C)\r\n");
+    }
 
-    /* 第二轮：InvertDirflag = 1（反向） */
-    controller->FlashData.InvertDirflag = 1;
+    /* === 第二轮：用确定后的 PhaseOrder 跑四点，算 elec_offset === */
     ErrTemp = 0;
     for (i = 0; i < 4; i++) {
         set_phase_voltage(controller, v_d, v_q, theta_open[i]);
@@ -375,52 +359,43 @@ void ElecAngleEstimate(ControllerStruct* controller) {
         DPT_Angles angles;
         DPT_GetLatestAngles(&angles);
         TempPosition[i] = angles.outer_raw;
-        printf("1: %d (%.2f deg)\r\n", (int)TempPosition[i],
+        printf("cali[%d]: %u (%.2f deg)\r\n", i, (unsigned)TempPosition[i],
                TempPosition[i] * 360.0f / ENCODER_BIT);
     }
-
     set_phase_voltage(controller, 0, 0, 0);
 
-    /* 第二轮预期方向是反的（InvertDirflag=1 交换了相序），所以 temp_norm < 0 才是正确 */
-    dir = 0;
+    /* 验证第二轮方向正确（应该都是正向） */
     for (i = 0; i < 3; i++) {
         int32_t temp = TempPosition[i + 1] - TempPosition[i];
+        if (temp > (int32_t)(ENCODER_BIT / 2))       temp -= ENCODER_BIT;
+        else if (temp < -(int32_t)(ENCODER_BIT / 2)) temp += ENCODER_BIT;
 
-        int32_t temp_norm = temp;
-        if (temp > (int32_t)(ENCODER_BIT / 2))
-            temp_norm -= ENCODER_BIT;
-        else if (temp < -(int32_t)(ENCODER_BIT / 2))
-            temp_norm += ENCODER_BIT;
-
-        printf("temp = %.2f deg (norm: %.2f deg)\r\n",
-               temp * 360.0f / ENCODER_BIT,
-               temp_norm * 360.0f / ENCODER_BIT);
-
-        if (ABS(temp_norm) < (ENCODER_BIT / (NPP * 4 * 2)))
+        if (ABS(temp) < (ENCODER_BIT / (NPP * 4 * 2)))
             ErrTemp++;
-
-        if (temp_norm < 0)
-            dir = 1;  // 第二轮反向转 = 正确
+        if (temp < 0) {
+            controller->ServoErrFlag.Bit.PhaseOrderErr = 1;
+            controller->FlashData.AngleOffsetFlag = ELEC_ANGLE_ESTIMATE_FAILED;
+            printf("ElecAngle FAIL: phase order mismatch in round 2\r\n");
+            return;
+        }
     }
 
     if (ErrTemp >= 1) {
         controller->ServoErrFlag.Bit.LockedRotorErr = 1;
-        controller->FlashData.AngleOffsetFlag       = ELEC_ANGLE_ESTIMATE_FAILED;
-        printf("Elec Angle Offset Estimate Fail (locked rotor)\r\n");
-    }
-
-    if (dir)
-        TempElecAngle = (uint16_t)(((NPP * TempPosition[0]) % ENCODER_BIT) >> ENCODER_16BIT_DIV);
-    else {
-        TempElecAngle = (uint16_t)((((NPP * TempPosition[0]) % ENCODER_BIT) >> ENCODER_16BIT_DIV) - 32767);
-        controller->ServoErrFlag.Bit.PhaseOrderErr = 1;
         controller->FlashData.AngleOffsetFlag = ELEC_ANGLE_ESTIMATE_FAILED;
-        printf("Elec Angle Offset Estimate Fail (wrong phase order)\r\n");
+        printf("ElecAngle FAIL: locked rotor in round 2\r\n");
+        return;
     }
 
-    controller->FlashData.elec_offest_1 = TempElecAngle;
-    printf("elec_offest_1 = %d\r\n", controller->FlashData.elec_offest_1);
-    controller->FlashData.InvertDirflag = InvertDirflag_pre;
+    /* 取第一个点（theta=0°）的编码器值算 elec_offset */
+    controller->FlashData.elec_offset =
+        (uint16_t)(((NPP * TempPosition[0]) % ENCODER_BIT) >> ENCODER_16BIT_DIV);
+    controller->FlashData.mech_offest = TempPosition[3] * 360 >> ENCODER_10BIT_DIV;
+
+    printf("elec_offset = %u, mech_offest = %d, PhaseOrder = %u\r\n",
+           (unsigned)controller->FlashData.elec_offset,
+           (int)controller->FlashData.mech_offest,
+           (unsigned)controller->FlashData.PhaseOrder);
 }
 
 uint8_t MechAngleOffsetEstimata(ControllerStruct* controller, int32_t UserAngle) {
@@ -462,7 +437,7 @@ uint8_t DefualtProteckKeyValue(ControllerStruct* controller) {
 
 uint8_t DefualtObjectToFlash(ControllerStruct* controller) {
     controller->FlashData.brake_time      = BRAKE_TIME;
-    controller->FlashData.InvertDirflag   = MOTOR_DIRECT_SAME;
+    controller->FlashData.PhaseOrder      = PHASE_ORDER_POSITIVE;
     controller->FlashData.mech_offest_out = 0;
     return 0;
 }

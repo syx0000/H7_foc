@@ -399,6 +399,19 @@ void dbg_log_print(void) {
                controller_eyou.real_position,
                controller_eyou.dtheta_mech / 1024);
         break;
+    case 11: {
+        /* 输出端编码器调试：检查 inner_raw 是否更新 */
+        DPT_Angles angles;
+        DPT_GetLatestAngles(&angles);
+        printf("Out_enc: inner_raw=%lu outer_raw=%lu | pos_out=%ld pos_out_pre=%ld | old_cnt=%ld circle=%d\r\n",
+               (unsigned long)angles.inner_raw,
+               (unsigned long)angles.outer_raw,
+               (long)controller_eyou.real_position_out,
+               (long)controller_eyou.real_position_out_pre,
+               (long)controller_eyou.old_angle_count_out,
+               controller_eyou.circle_count_out);
+        break;
+    }
     case 30:
         printf("current_get: %d,%d\r\n", controller_eyou.V_q, controller_eyou.V_d);
         break;
@@ -617,8 +630,8 @@ void dbg_log_print(void) {
         printf("  Ib              %-16u %u\r\n", ram->Ib_offset, fls->Ib_offset);
         printf("  Ic              %-16u %u\r\n", ram->Ic_offset, fls->Ic_offset);
         printf("[Angle]\r\n");
-        printf("  elec0           %-16u %u\r\n", ram->elec_offest_0, fls->elec_offest_0);
-        printf("  elec1           %-16u %u\r\n", ram->elec_offest_1, fls->elec_offest_1);
+        printf("  elec            %-16u %u\r\n", ram->elec_offset, fls->elec_offset);
+        printf("  PhaseOrder      %-16u %u\r\n", ram->PhaseOrder, fls->PhaseOrder);
         printf("  mech            %-16ld %ld\r\n", (long)ram->mech_offest, (long)fls->mech_offest);
         printf("  mech_out        %-16ld %ld\r\n", (long)ram->mech_offest_out, (long)fls->mech_offest_out);
         printf("[PosPID]\r\n");
@@ -654,7 +667,6 @@ void dbg_log_print(void) {
         printf("  LockRot         %-16u %u\r\n", ram->LockedRotorProtectKey, fls->LockedRotorProtectKey);
         printf("  StoState        %-16lu %lu\r\n", (unsigned long)ram->stoStateFlag, (unsigned long)fls->stoStateFlag);
         printf("[Misc]\r\n");
-        printf("  InvDir          %-16d %d\r\n", ram->InvertDirflag, fls->InvertDirflag);
         printf("  BrakeT          %-16u %u\r\n", ram->brake_time, fls->brake_time);
         printf("  Crc             0x%08lX       0x%08lX\r\n", (unsigned long)ram->Crc, (unsigned long)fls->Crc);
         printf("[Size] sizeof(FlashSavedData)=%u\r\n", (unsigned)sizeof(FlashSavedData));

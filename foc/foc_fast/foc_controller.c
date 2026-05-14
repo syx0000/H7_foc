@@ -71,8 +71,8 @@ FlashSavedData flash_data = {
     .Ib_offset       = 0,
     .Ic_offset       = 0,
     .AngleOffsetFlag = 0,
-    .elec_offest_0   = 0,
-    .elec_offest_1   = 0,
+    .elec_offset     = 0,
+    .PhaseOrder      = PHASE_ORDER_POSITIVE,
     .mech_offest     = 0,
     .PidFlag         = 0,
     //.Position_Kp     = INC_PID_POSITION_KP,
@@ -101,7 +101,6 @@ FlashSavedData flash_data = {
     .ProteckKeyFlag        = 0,
     .BusVolProteckKey      = DEFAULT_BUS_VOL_PROTECT_KEY,
     .LockedRotorProtectKey = DEFAULT_LOCKED_MOTOR_PROTECT_KEY,
-    .InvertDirflag         = MOTOR_DIRECT_SAME,
     .brake_time            = BRAKE_TIME,
     .mech_offest_out       = 0,
 };
@@ -142,17 +141,12 @@ void set_phase_voltage(ControllerStruct* controller, int32_t d, int32_t q, int32
   controller->CCR3 = ccr3;
   controller->CCR4 = ccr4;
 
-#if CHANGE_PHASE_ORDER_UV
-  if (controller->FlashData.InvertDirflag == 1) {
-    pwm_ccr_set(controller->CCR3, controller->CCR2, controller->CCR4);
-  } else {
-    pwm_ccr_set(controller->CCR2, controller->CCR3, controller->CCR4);
-  }
-#else
-  if (controller->FlashData.InvertDirflag == 1) {
+  /* PhaseOrder 镜像：NEGATIVE 下交换 B/C 相 PWM (CCR3↔CCR4)，等价于 Vβ→-Vβ。
+     与 phase_current_sample 的 Ib_raw 当作 I_c 解释保持对称，整体效果 = 电角度取负。
+     注意：A/B 交换不等价于 Vβ 翻转（αβ 平面会混合变换），必须用 B/C 交换。 */
+  if (controller->FlashData.PhaseOrder == PHASE_ORDER_POSITIVE) {
     pwm_ccr_set(controller->CCR2, controller->CCR3, controller->CCR4);
   } else {
-    pwm_ccr_set(controller->CCR3, controller->CCR2, controller->CCR4);
+    pwm_ccr_set(controller->CCR2, controller->CCR4, controller->CCR3);
   }
-#endif
 }
