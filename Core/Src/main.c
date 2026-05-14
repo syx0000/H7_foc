@@ -250,7 +250,12 @@ int main(void)
 			motorOverPosCheck();         // 软位置限位
 
 			/* 故障总分发：扫描所有故障位，触发时停机 */
-			CheckAndHandleAllFaultBits();
+			if(!g_foc_openloop_enable) {
+				CheckAndHandleAllFaultBits();
+			}
+
+			/* 到达判据检测 */
+			target_reach_check();
 		}
 
 		/* CAN 1ms tick (主动上报模式, 默认关闭) */

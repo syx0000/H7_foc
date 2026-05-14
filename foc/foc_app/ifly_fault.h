@@ -107,6 +107,7 @@ uint16_t getIBusCurrent(void);
 uint8_t LockedRotorProFunc(void);
 uint8_t motorFaultCheck(void);
 uint8_t ClearFaults(uint8_t Fault_clear);    //
+void target_reach_check(void);
 /* ADC */
 int8_t TemperatureInquiry(uint16_t adc_value);
 

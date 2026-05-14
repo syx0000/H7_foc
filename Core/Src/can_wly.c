@@ -7,6 +7,8 @@
 #include "foc_api.h"
 #include "foc_controller.h"
 #include "foc_bsp.h"
+#include "ifly_fault.h"
+#include "ifly_fault_api.h"
 #include <string.h>
 #include <math.h>
 
@@ -36,6 +38,8 @@ static uint8_t s_can_timeout_enabled = 0;
 
 /* ========== 访问全局控制器 ========== */
 extern ControllerStruct controller_eyou;
+extern ifly_Err_Pro_Type motorProValue;
+extern Portection_Value Threshold;
 
 /* ========== 小工具: float <-> uint 定点 ========== */
 static uint32_t float_to_uint(float x, float x_min, float x_max, uint8_t bits) {
@@ -121,7 +125,11 @@ static void pack_status_frame(uint8_t *d) {
 
     uint16_t err1 = (uint16_t)(controller_eyou.ServoErrFlag.All_Flag & 0xFFFF);
     uint8_t  err2 = (uint8_t)((controller_eyou.ServoErrFlag.All_Flag >> 16) & 0xFF);
+
+    /* WARN: Bit0=MOS过温警告(90°C), Bit1=电机过温警告 */
     uint8_t  warn = 0;
+    if (motorProValue.board_temp >= (int8_t)Threshold.TemBoradWarn) warn |= 0x01;
+    if (motorProValue.motor_temp >= (int8_t)Threshold.TemBoradWarn) warn |= 0x02;
 
     d[0] = p_int & 0xFF;
     d[1] = (p_int >> 8) & 0xFF;
@@ -136,9 +144,12 @@ static void pack_status_frame(uint8_t *d) {
     d[10] = warn;
 
     uint8_t sta = 0;
-    if (controller_eyou.foc_run) sta |= 0x01;
-    if (controller_eyou.ServoErrFlag.All_Flag) sta |= 0x02;
-    if (warn) sta |= 0x04;
+    if (controller_eyou.foc_run) sta |= 0x01;                       /* Bit0: 使能 */
+    if (controller_eyou.ServoErrFlag.All_Flag) sta |= 0x02;         /* Bit1: 故障 */
+    if (warn) sta |= 0x04;                                          /* Bit2: 警告 */
+    if (controller_eyou.ServoState.Bit.PositionArrivedFlag ||
+        controller_eyou.ServoState.Bit.SpeedArrivedFlag ||
+        controller_eyou.ServoState.Bit.CurrentArrivedFlag) sta |= 0x08;  /* Bit3: 到达 */
     d[11] = sta;
 }
 

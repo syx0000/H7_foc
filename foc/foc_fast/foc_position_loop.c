@@ -15,7 +15,7 @@
  * 对齐 DEFAULT_MAX_SPEED = 载端 100rpm 硬限幅; 测试架不够用 (母线电容 ~100µF, 无刹车电阻)
  * 时需下调 VMAX。 */
 #define POS_TRAPEZOID_DEFAULT_VMAX_RPM   100.0f
-#define POS_TRAPEZOID_DEFAULT_AMAX_RPS   230.0f
+#define POS_TRAPEZOID_DEFAULT_AMAX_RPS   200.0f
 /* output rpm → LSB/tick 系数 (位置环 Ts = 1/2500 s) */
 #define POS_TRAPEZOID_VMAX_SCALE         (6.0f * 1024.0f / 2500.0f)              /* ≈ 2.4576 */
 #define POS_TRAPEZOID_AMAX_SCALE         (6.0f * 1024.0f / (2500.0f * 2500.0f))  /* ≈ 9.830e-4 */

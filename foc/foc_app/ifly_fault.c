@@ -142,10 +142,10 @@ int8_t boradTempProFunc(void) {
 
 /*******************************************************************************
  * busOverCurrentCheck - 母线过流保护（基于相电流峰值，10 次滤波）
- * 仅在电机运行时检测（不运行时 I_q 应为 0，避免 ADC offset 漂移误触发）
+ * 开环和闭环运行时都检测（foc_run >= 1）
  ******************************************************************************/
 void busOverCurrentCheck(void) {
-    if (controller_eyou.foc_run != 2) {
+    if (controller_eyou.foc_run < 1) {
         oc_filter_cnt = 0;
         return;
     }
@@ -165,9 +165,10 @@ void busOverCurrentCheck(void) {
 
 /*******************************************************************************
  * LockedRotorProFunc - 堵转保护（电流大 + 速度小 = 堵转）
+ * 开环和闭环运行时都检测（foc_run >= 1）
  ******************************************************************************/
 uint8_t LockedRotorProFunc(void) {
-    if (controller_eyou.foc_run != 2) {
+    if (controller_eyou.foc_run < 1) {
         locked_filter_cnt = 0;
         return 0;
     }
@@ -313,9 +314,10 @@ uint8_t ClearFaults(uint8_t Fault_clear) {
 
 /*******************************************************************************
  * 偏差监控函数（速度/位置/电流跟随偏差超限）
+ * 仅在闭环控制时检测（foc_run == 2）
  ******************************************************************************/
 void motorSpeedOffsetCheck(void) {
-    if (controller_eyou.foc_run != 2) {
+    if (controller_eyou.foc_run < 1) {
         spd_offset_cnt = 0;
         return;
     }
@@ -340,7 +342,7 @@ void motorSpeedOffsetCheck(void) {
 }
 
 void motorPosOffsetCheck(void) {
-    if (controller_eyou.foc_run != 2) {
+    if (controller_eyou.foc_run < 1) {
         pos_offset_cnt = 0;
         return;
     }
@@ -364,7 +366,7 @@ void motorCurrentOffsetCheck(void) {
 }
 
 void motorOverPosCheck(void) {
-    if (controller_eyou.foc_run != 2) return;
+    if (controller_eyou.foc_run < 1) return;
     if (controller_eyou.FlashData.PositionLimitFlag != 50) return;
 
     int32_t pos = controller_eyou.real_position_out;
@@ -375,7 +377,7 @@ void motorOverPosCheck(void) {
 }
 
 void motorSpeedOverCheck(void) {
-    if (controller_eyou.foc_run != 2) return;
+    if (controller_eyou.foc_run < 1) return;
 
     int32_t spd = controller_eyou.dtheta_mech;
     if (spd < 0) spd = -spd;
@@ -411,6 +413,86 @@ uint8_t check_fault_flag(void) {
 
 uint8_t get_warn_status(void) { return 0; }
 uint8_t get_hardword_status(void) { return 0; }
+
+/*******************************************************************************
+ * target_reach_check - 到达判据检测（1ms 周期调用）
+ * 根据当前控制模式判断位置/速度/电流是否到达目标
+ ******************************************************************************/
+void target_reach_check(void) {
+    static uint16_t pos_arrive_cnt = 0;
+    static uint16_t spd_arrive_cnt = 0;
+    static uint16_t cur_arrive_cnt = 0;
+
+    if (controller_eyou.foc_run < 1) {
+        pos_arrive_cnt = 0;
+        spd_arrive_cnt = 0;
+        cur_arrive_cnt = 0;
+        controller_eyou.ServoState.Bit.PositionArrivedFlag = 0;
+        controller_eyou.ServoState.Bit.SpeedArrivedFlag = 0;
+        controller_eyou.ServoState.Bit.CurrentArrivedFlag = 0;
+        return;
+    }
+
+    uint8_t mode = controller_eyou.controller_mode;
+
+    /* 位置模式 */
+    if (mode == PROFILE_POSITION_MODE || mode == CYCLIC_SYNC_POSITION_MODE) {
+        int32_t err = controller_eyou.position_ref - controller_eyou.real_position_out;
+        if (err < 0) err = -err;
+
+        if ((uint32_t)err < controller_eyou.FlashData.PositionArrivedValue) {
+            if (++pos_arrive_cnt >= POSITION_ARRIVED_TIME) {
+                pos_arrive_cnt = POSITION_ARRIVED_TIME;
+                controller_eyou.ServoState.Bit.PositionArrivedFlag = 1;
+            }
+        } else {
+            pos_arrive_cnt = 0;
+            controller_eyou.ServoState.Bit.PositionArrivedFlag = 0;
+        }
+    } else {
+        pos_arrive_cnt = 0;
+        controller_eyou.ServoState.Bit.PositionArrivedFlag = 0;
+    }
+
+    /* 速度模式 */
+    if (mode == PROFILE_VELOCITY_MOCE || mode == CYCLIC_SYNC_VELOCITY_MODE) {
+        int32_t err = controller_eyou.velocity_ref_filterd - controller_eyou.dtheta_mech;
+        if (err < 0) err = -err;
+
+        int32_t threshold = (int32_t)controller_eyou.FlashData.SpeedArrivedValue * 1024;
+        if (err < threshold) {
+            if (++spd_arrive_cnt >= SPEED_ARRIVED_TIME) {
+                spd_arrive_cnt = SPEED_ARRIVED_TIME;
+                controller_eyou.ServoState.Bit.SpeedArrivedFlag = 1;
+            }
+        } else {
+            spd_arrive_cnt = 0;
+            controller_eyou.ServoState.Bit.SpeedArrivedFlag = 0;
+        }
+    } else {
+        spd_arrive_cnt = 0;
+        controller_eyou.ServoState.Bit.SpeedArrivedFlag = 0;
+    }
+
+    /* 力矩模式 */
+    if (mode == PROFILE_TORQUE_MODE || mode == CYCLIC_SYNC_TORQUE_MODE) {
+        int32_t err = controller_eyou.I_q_ref - controller_eyou.I_q;
+        if (err < 0) err = -err;
+
+        if ((uint32_t)err < controller_eyou.FlashData.CurrentArrivedValue) {
+            if (++cur_arrive_cnt >= CURRENT_ARRIVED_TIME) {
+                cur_arrive_cnt = CURRENT_ARRIVED_TIME;
+                controller_eyou.ServoState.Bit.CurrentArrivedFlag = 1;
+            }
+        } else {
+            cur_arrive_cnt = 0;
+            controller_eyou.ServoState.Bit.CurrentArrivedFlag = 0;
+        }
+    } else {
+        cur_arrive_cnt = 0;
+        controller_eyou.ServoState.Bit.CurrentArrivedFlag = 0;
+    }
+}
 
 /*******************************************************************************
  * 抱闸控制（硬件未接入，保留空实现）
