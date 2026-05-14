@@ -39,6 +39,12 @@ extern volatile uint8_t USART_CONTROL;
 #define USE_CURRENT_LOOP_FILTER 1       // 使用电流环斜坡指令滤波0
 #define CURRENT_LOOP_MIN_ACC_TIME 10    // 电流环滤波时间ms
 
+/*反电动势前馈 (BEMF Feed-Forward)
+ *  Vd_ff = -ω_e × Lq × Iq
+ *  Vq_ff = +ω_e × Ld × Id + ω_e × ψ_f
+ * 高速时给电流环提供电压基准, 减小 PI 输出, 留电压裕量, 降低过调制概率 */
+#define USE_BEMF_FF 1     // 反电动势前馈使能: 1=开, 0=关
+
 //弱磁控制
 #define USE_WEAK_MAGN   0     // 弱磁控制使能开关：1开启，0关闭
 #define WEAK_MAGN_DEPTH 500   //弱磁深度单位
@@ -113,6 +119,7 @@ extern volatile uint8_t USART_CONTROL;
 #define CYCLIC_SYNC_POSITION_MODE 8   /**< \brief Cyclic Synchronous Position mode*/
 #define CYCLIC_SYNC_VELOCITY_MODE 9   /**< \brief Cyclic Synchronous Velocity mode*/
 #define CYCLIC_SYNC_TORQUE_MODE 10    /**< \brief Cyclic Synchronous Torque mode*/
+#define MIT_PD_MODE 11                /**< \brief MIT PD mode (Kp*pos_err + Kd*vel_err + Tff → Iq)*/
 #endif
 
 #define DEFAULT_RUN_MODE NO_MODE
@@ -141,7 +148,7 @@ extern uint32_t INC_PID_SPEED_KP;
 extern uint32_t INC_PID_SPEED_KI;
 extern uint32_t INC_PID_SPEED_KD;
 extern uint32_t POSERRFF_KP;
-#define INC_PID_SPEED_LIMIT DEFAULT_MAX_CURRENT
+#define INC_PID_SPEED_LIMIT (10 * 1024)    // 速度环输出限幅 10A (原 25A 偏高, 详见过调制对策backlog.md)
 #define DEFAULT_PID_SPEED_DIV 65000
 
 extern uint32_t INC_PID_CURRENT_KP;
@@ -526,6 +533,16 @@ typedef struct {
 
   /*电感辨识*/
   InductanceIdent ident_test;
+
+  /* MIT PD 模式参数 (CAN 0x500 帧写入, FOC 主循环读取) */
+  float mit_p_des;     /* 位置目标 [rad] 输出端 */
+  float mit_v_des;     /* 速度目标 [rad/s] 输出端 */
+  float mit_t_ff;      /* 前馈扭矩 [A] (q轴电流, 实数) */
+  float mit_kp;        /* 位置刚度 [A/rad] */
+  float mit_kd;        /* 速度阻尼 [A·s/rad] */
+
+  /* BEMF 前馈预算常量 (Init_foc 时计算, ISR 直接用) */
+  float bemf_omega_e_k;  /* NPP * 2π / (1024 * 60) */
 
 } ControllerStruct;
 

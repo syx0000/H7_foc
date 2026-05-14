@@ -22,6 +22,20 @@ extern ifly_Err_Pro_Type motorProValue;
     :
 ********************************************************************************/
 void foc_velocity_close_loop(ControllerStruct* controller) {
+  /* MIT PD 模式直接算 Iq, 跳过斜坡和速度 PID */
+  if (controller->controller_mode == MIT_PD_MODE) {
+    float pos_cur = (float)controller->real_position_out / (1024.0f * 180.0f / 3.14159265f);
+    float vel_cur = (float)controller->dtheta_mech_out / 1024.0f * (2.0f * 3.14159265f / 60.0f);
+    float iq_out = controller->mit_kp * (controller->mit_p_des - pos_cur)
+                 + controller->mit_kd * (controller->mit_v_des - vel_cur)
+                 + controller->mit_t_ff;
+    int32_t iq_q10 = (int32_t)(iq_out * 1024.0f);
+    if (iq_q10 > INC_PID_SPEED_LIMIT) iq_q10 = INC_PID_SPEED_LIMIT;
+    else if (iq_q10 < -INC_PID_SPEED_LIMIT) iq_q10 = -INC_PID_SPEED_LIMIT;
+    controller->I_q_ref = iq_q10;
+    return;
+  }
+
   set_velocity_ref_loop(controller->velocity_ref);
   //
 #if USE_SPEED_LOOP_SMOOTH

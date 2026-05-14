@@ -188,7 +188,10 @@ static void handle_torque_cmd(const uint8_t *data, uint32_t len) {
     if (off < 0) return;
     uint16_t t_raw = (uint16_t)data[off] | ((uint16_t)data[off + 1] << 8);
     float t_nm = uint_to_float(t_raw, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
-    controller_eyou.I_q_ref = tq_nm_to_iq(t_nm);
+    int32_t iq = tq_nm_to_iq(t_nm);
+    if (iq > INC_PID_SPEED_LIMIT) iq = INC_PID_SPEED_LIMIT;
+    else if (iq < -INC_PID_SPEED_LIMIT) iq = -INC_PID_SPEED_LIMIT;
+    controller_eyou.I_q_ref = iq;
     controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
     send_status_frame();
 }
@@ -220,38 +223,26 @@ static void handle_position_cmd(const uint8_t *data, uint32_t len) {
 }
 
 /* 0x500 MIT指令: 12 字节/槽 = POS[23:0]+VEL[15:0]+T[15:0]+Kp[15:0]+Kd[15:0]+CANID
- * MIT 运算: Iq_ref = (Kp*(pos_des-pos_cur) + Kd*(vel_des-vel_cur) + Tff) / KT
- *
- * TODO: 本工程未实现完整 MIT 运算核。当前实现:
- *   - 仅保存位置目标和前馈扭矩到 controller
- *   - Kp/Kd 参数被丢弃，速度目标未使用
- *   - 使用 CYCLIC_SYNC_POSITION_MODE 承接，实际运行位置环
- *
- * 完整实现需要:
- *   1. 新增 MIT 控制模式枚举 (如 MIT_PD_MODE)
- *   2. 在 FOC 主循环中添加 MIT 运算分支
- *   3. 将 Kp*(pos_err) + Kd*(vel_err) + Tff 直接输出到 I_q_ref
- */
+ * MIT 运算 (移植自 motor_h7 FOC.c:351):
+ *   Iq_ref = Kp*(p_des - pos_cur) + Kd*(v_des - vel_cur) + t_ff
+ * 运算在 FOC 主循环 (速度环周期) 执行, 此处仅解析并存入 controller */
 static void handle_mit_cmd(const uint8_t *data, uint32_t len) {
     int32_t off = find_slot(data, len, 12);
     if (off < 0) return;
-    /* 解析 MIT 指令参数 */
-    uint32_t p_raw = (uint32_t)data[off] | ((uint32_t)data[off + 1] << 8) |
-                     ((uint32_t)data[off + 2] << 16);
-    uint16_t v_raw = (uint16_t)data[off + 3] | ((uint16_t)data[off + 4] << 8);
-    uint16_t t_raw = (uint16_t)data[off + 5] | ((uint16_t)data[off + 6] << 8);
-    /* Kp/Kd 参数暂未使用 (TODO: 实现完整 MIT 运算) */
-    // uint16_t kp_raw = (uint16_t)data[off + 7] | ((uint16_t)data[off + 8] << 8);
-    // uint16_t kd_raw = (uint16_t)data[off + 9] | ((uint16_t)data[off + 10] << 8);
+    uint32_t p_raw  = (uint32_t)data[off] | ((uint32_t)data[off + 1] << 8) |
+                      ((uint32_t)data[off + 2] << 16);
+    uint16_t v_raw  = (uint16_t)data[off + 3] | ((uint16_t)data[off + 4] << 8);
+    uint16_t t_raw  = (uint16_t)data[off + 5] | ((uint16_t)data[off + 6] << 8);
+    uint16_t kp_raw = (uint16_t)data[off + 7] | ((uint16_t)data[off + 8] << 8);
+    uint16_t kd_raw = (uint16_t)data[off + 9] | ((uint16_t)data[off + 10] << 8);
 
-    float p_rad = uint_to_float(p_raw, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
-    float t_nm = uint_to_float(t_raw, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
-    (void)v_raw;  /* 速度目标暂未使用 */
+    controller_eyou.mit_p_des = uint_to_float(p_raw, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
+    controller_eyou.mit_v_des = uint_to_float(v_raw, g_can_wly_lim.spd_min, g_can_wly_lim.spd_max, 16);
+    controller_eyou.mit_t_ff  = uint_to_float(t_raw, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16) / g_can_wly_kt_out;
+    controller_eyou.mit_kp    = uint_to_float(kp_raw, g_can_wly_lim.kp_min, g_can_wly_lim.kp_max, 16);
+    controller_eyou.mit_kd    = uint_to_float(kd_raw, g_can_wly_lim.kd_min, g_can_wly_lim.kd_max, 16);
 
-    /* 临时方案: 将位置目标和前馈扭矩写入位置环 */
-    controller_eyou.position_ref = pos_rad_to_int(p_rad);
-    controller_eyou.I_q_ref = tq_nm_to_iq(t_nm);
-    controller_eyou.controller_mode = CYCLIC_SYNC_POSITION_MODE;
+    controller_eyou.controller_mode = MIT_PD_MODE;
     send_status_frame();
 }
 

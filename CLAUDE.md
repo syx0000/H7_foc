@@ -150,6 +150,14 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
 - 速度环: 0.6（补偿电流环 + 速度滤波 + 减速箱滞后）
 - 位置环: 0.4（机械刚度有限 + 减速箱反向间隙）
 
+### 电流环前馈与保护参数
+- **反电动势前馈**: `USE_BEMF_FF = 1`（默认开启）
+  - Vd_ff = -ωe·Lq·Iq, Vq_ff = ωe·(Ld·Id + ψ_f)
+  - 参数来源: Flash 辨识值 (Rs/Ld/Lq/ψ_f)
+- **速度环电流限幅**: `INC_PID_SPEED_LIMIT = 10A`（Q10 = 10240）
+- **速度环斜坡**: `MIN_ACC_TIME = 400ms`（加速度 250 rpm/s，对齐梯形规划）
+- **位置环梯形规划**: `POS_TRAPEZOID_DEFAULT_AMAX_RPS = 200 rpm/s`
+
 ## 硬件配置
 
 ### 定时器
@@ -228,7 +236,7 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
 
 ### 当前编译规模
 ```
-Program Size: Code=81132 RO-data=4640 RW-data=708 ZI-data=27588
+Program Size: Code=87372 RO-data=4820 RW-data=732 ZI-data=27780
 "cubemx_yxsui\cubemx_yxsui.axf" - 0 Error(s), 0 Warning(s).
 ```
 
@@ -436,13 +444,18 @@ extern volatile uint32_t g_adc_isr_cycles_max;   // ADC ISR 历史最大耗时
 
 - **分支**: main
 - **用户**: syx0000
-- **最近主要工作**: 三环 PID autoTune + 全套带宽测试 (bwtest1~9) + Flash 缓存 + 梯形规划修复
+- **最近主要工作**: 故障保护层 + CAN 万里扬 V1.7 协议从站 + BEMF 前馈 + 过调制对策 + cantest 单元自测
 
 ## 相关文档
 
 - `SUMMARY.md` - 开发总结
 - `PLAN.md` - 开发路线
 - `中断配置清单.md` - 中断/DMA 配置详情
+- `CAN_WLY_PROTOCOL_VERIFY.md` - CAN 协议验证流程 + cantest 用例
+- `过调制对策backlog.md` - 过调制/空载跑飞对策 + 实施状态
+- `速度阶跃损坏风险分析.md` - 速度阶跃硬件损坏机理 + MIN_ACC_TIME 推导
+- `FAULT_PROTECTION.md` - 故障保护层设计
+- `FOC_ISR_OPTIMIZATION.md` - ISR 耗时优化
 - STM32H743 数据手册 (RM0433)
 - DPT 编码器数据手册 v0.5
 - 万里扬 FDCAN 通信协议 V1.7

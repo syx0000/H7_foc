@@ -102,6 +102,18 @@ void foc_current_close_loop(ControllerStruct* controller) {
     weak_magn_control(controller);
   #endif
 
+  #if USE_BEMF_FF
+    if (controller->ident_test.flux_psi > 0.0f &&
+        controller->ident_test.Lq > 0.0f) {
+      float omega_e = (float)controller->dtheta_mech * controller->bemf_omega_e_k;
+      float Vd_ff = -omega_e * controller->ident_test.Lq * (float)controller->I_q;
+      float Vq_ff =  omega_e * (controller->ident_test.Ld * (float)controller->I_d
+                                + controller->ident_test.flux_psi * 1024.0f);
+      controller->V_d += (int32_t)Vd_ff;
+      controller->V_q += (int32_t)Vq_ff;
+    }
+  #endif
+
   // uvw
   check_phases_overcurrent_timesliced(controller);
 

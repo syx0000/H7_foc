@@ -79,6 +79,9 @@ void ResetControlData(ControllerStruct* controller) {
                                         DEFAULT_PID_POSITION_DIV,
                                         controller->FlashData.Pid_PositionLimit);
     controller->IncPID_Position.PidRun = PositionPID;
+
+    extern uint8_t NPP;
+    controller->bemf_omega_e_k = (float)NPP * 2.0f * 3.14159265f / (1024.0f * 60.0f);
 }
 
 /*******************************************************************************

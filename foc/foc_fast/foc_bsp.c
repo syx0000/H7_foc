@@ -348,7 +348,10 @@ void dbg_cmd_set(void) {
 
         if (controller_eyou.controller_mode == PROFILE_TORQUE_MODE ||
             controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE) {
-            controller_eyou.I_q_ref = Data;
+            int32_t iq = Data;
+            if (iq > INC_PID_SPEED_LIMIT) { iq = INC_PID_SPEED_LIMIT; printf("  iq cmd clamped to +%d\r\n", INC_PID_SPEED_LIMIT); }
+            else if (iq < -INC_PID_SPEED_LIMIT) { iq = -INC_PID_SPEED_LIMIT; printf("  iq cmd clamped to -%d\r\n", INC_PID_SPEED_LIMIT); }
+            controller_eyou.I_q_ref = iq;
             controller_eyou.velocity_ref = 0;
         } else if (controller_eyou.controller_mode == PROFILE_VELOCITY_MOCE ||
                    controller_eyou.controller_mode == CYCLIC_SYNC_VELOCITY_MODE) {

@@ -194,11 +194,16 @@ uint8_t LockedRotorProFunc(void) {
 }
 
 /*******************************************************************************
- * driverChipFaultCheck - DRV8353 nFAULT 引脚检测
- * TODO: 需要确认 nFAULT GPIO 引脚是否已接入
+ * driverChipFaultCheck - DRV8353 nFAULT 检测 (PE15 → TIM1_BKIN)
+ * nFAULT 拉低 → TIM1 BKIN 硬件自动关 PWM (MOE=0)
+ * 软件层读 BIF 位同步故障标志，并尝试恢复 MOE（清错后）
  ******************************************************************************/
 uint8_t driverChipFaultCheck(void) {
-    /* nFAULT 引脚未接入硬件，暂不实现 */
+    if (TIM1->SR & TIM_SR_BIF) {
+        TIM1->SR = ~TIM_SR_BIF;
+        controller_eyou.ServoErrFlag.Bit.DriverChipNfault = 1;
+        return 1;
+    }
     return 0;
 }
 
@@ -388,6 +393,10 @@ uint8_t ClearFaults(uint8_t Fault_clear) {
     if (Fault_clear) {
         controller_eyou.ServoErrFlag.All_Flag = 0;
         clear_all_fault_counters();
+        /* BKIN 触发后 MOE=0, 仅当 nFAULT 已释放 (PE15=高) 时恢复 */
+        if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_15) == GPIO_PIN_SET) {
+            TIM1->BDTR |= TIM_BDTR_MOE;
+        }
         printf("All faults cleared, ready to restart\r\n");
     }
     return 0;
