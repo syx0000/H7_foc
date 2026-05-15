@@ -17,6 +17,7 @@
 #include "ifly_fault_api.h"
 #include "ifly_flux_ident.h"
 #include "ifly_inertia_ident.h"
+#include "encoder_calc.h"
 #include "adc.h"
 #include "tim.h"
 #include <math.h>
@@ -754,6 +755,22 @@ uint32_t Get_Double_Encoder_Value(void) {
 }
 
 uint32_t Reset_objReset_Output_Encoder(uint32_t reset) {
+    static uint32_t last_reset_value = 0;
+
+    if (reset == 1 && last_reset_value == 0) {
+        if (controller_eyou.controller_mode == HOMING_MODE) {
+            controller_eyou.FlashData.mech_offest_out = controller_eyou.old_angle_count_out_raw;
+            controller_eyou.circle_count_out = 0;
+
+            Encoder_out_data_Reset(controller_eyou.FlashData.MaxPositionLimit,
+                                   controller_eyou.FlashData.MinPositionLimit);
+
+            printf("Output position offset set to %d\n",
+                   (int)controller_eyou.FlashData.mech_offest_out);
+        }
+    }
+
+    last_reset_value = reset;
     return 0;
 }
 

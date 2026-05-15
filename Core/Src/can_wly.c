@@ -404,10 +404,11 @@ static void handle_ctrl_frame(const uint8_t *data, uint32_t len) {
         controller_eyou.foc_run = 0;
         break;
     case CAN_WLY_CTRL_SET_ZERO:
-        /* 将当前机械位置设为零点 */
-        controller_eyou.FlashData.mech_offest_out = controller_eyou.real_position_out +
-                                                    controller_eyou.FlashData.mech_offest_out;
+        /* 将当前机械位置设为零点 (PHU 接口) */
+        controller_eyou.controller_mode = HOMING_MODE;
+        Reset_objReset_Output_Encoder(1);
         controller_eyou.UserDataSaveFlag = 1;
+        Reset_objReset_Output_Encoder(0);
         break;
     case CAN_WLY_CTRL_CLR_ERR:
         controller_eyou.ServoErrFlag.All_Flag = 0;

@@ -126,8 +126,8 @@ void foc_current_close_loop(ControllerStruct* controller) {
    * 2550~2650rpm: 线性从 100% 削到 0%
    * >2650rpm: 输出归零
    * scale 经一阶低通滤波, 避免阈值附近电压跳变产生噪音 */
-  #define OVERSPD_LOW   (2550 * 1024)
-  #define OVERSPD_HIGH  (2650 * 1024)
+  #define OVERSPD_LOW   (2600 * 1024)
+  #define OVERSPD_HIGH  (2700 * 1024)
   {
     static int32_t scale_filt = 1024;
     int32_t spd_abs = controller->dtheta_mech;

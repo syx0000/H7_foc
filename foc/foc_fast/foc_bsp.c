@@ -857,6 +857,16 @@ void dbg_log_print(void) {
         printf("All faults cleared, ready to restart\r\n");
         dbgLogFlag = 0;
         break;
+    case 164:
+        /* 设置当前位置为零点 (等效 PHU HOMING_MODE 置零) */
+        controller_eyou.controller_mode = HOMING_MODE;
+        Reset_objReset_Output_Encoder(1);
+        controller_eyou.UserDataSaveFlag = 1;
+        printf("Reset_objReset_Output_Encoder: %ld\r\n",
+               (long)controller_eyou.FlashData.mech_offest_out);
+        Reset_objReset_Output_Encoder(0);
+        dbgLogFlag = 0;
+        break;
     default:
         break;
     }
