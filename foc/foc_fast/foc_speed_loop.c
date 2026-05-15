@@ -24,14 +24,23 @@ extern ifly_Err_Pro_Type motorProValue;
 void foc_velocity_close_loop(ControllerStruct* controller) {
   /* MIT PD 模式直接算 Iq, 跳过斜坡和速度 PID */
   if (controller->controller_mode == MIT_PD_MODE) {
+    static float vel_filt = 0.0f;
     float pos_cur = (float)controller->real_position_out / (1024.0f * 180.0f / 3.14159265f);
-    float vel_cur = (float)controller->dtheta_mech_out / 1024.0f * (2.0f * 3.14159265f / 60.0f);
-    float iq_out = controller->mit_kp * (controller->mit_p_des - pos_cur)
-                 + controller->mit_kd * (controller->mit_v_des - vel_cur)
+    float vel_raw = (float)controller->dtheta_mech_out / 1024.0f * (2.0f * 3.14159265f / 60.0f);
+    vel_filt += 0.05f * (vel_raw - vel_filt);
+    float pos_err = controller->mit_p_des - pos_cur;
+    float vel_err = controller->mit_v_des - vel_filt;
+    /* 位置死区: 消除减速箱间隙引起的极限环 (±0.003 rad ≈ 0.17° 输出端) */
+    if (pos_err >  0.003f) pos_err -= 0.003f;
+    else if (pos_err < -0.003f) pos_err += 0.003f;
+    else pos_err = 0.0f;
+    float iq_out = controller->mit_kp * pos_err
+                 + controller->mit_kd * vel_err
                  + controller->mit_t_ff;
     int32_t iq_q10 = (int32_t)(iq_out * 1024.0f);
-    if (iq_q10 > INC_PID_SPEED_LIMIT) iq_q10 = INC_PID_SPEED_LIMIT;
-    else if (iq_q10 < -INC_PID_SPEED_LIMIT) iq_q10 = -INC_PID_SPEED_LIMIT;
+    int32_t max_cur = (int32_t)controller->FlashData.MaxCurrent;
+    if (iq_q10 >  max_cur) iq_q10 =  max_cur;
+    if (iq_q10 < -max_cur) iq_q10 = -max_cur;
     controller->I_q_ref = iq_q10;
     return;
   }
@@ -57,7 +66,12 @@ void foc_velocity_close_loop(ControllerStruct* controller) {
        controller->controller_mode == CYCLIC_SYNC_POSITION_MODE)) {
     // PID
     int32_t TempIq = 0;
+    #if USE_SPEED_NOTCH
+    int32_t spd_fb = (int32_t)biquadFilterApply(&controller->speed_notch, (float)controller->dtheta_mech);
+    controller->IncPID_Speed.NowValue = spd_fb;
+    #else
     controller->IncPID_Speed.NowValue = controller->dtheta_mech;
+    #endif
     controller->IncPID_Speed.AimValue = controller->velocity_ref_filterd;
     controller->IncPID_Speed.PidRun(&controller->IncPID_Speed);
     TempIq              = controller->IncPID_Speed.OutPut;

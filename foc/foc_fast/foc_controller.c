@@ -50,15 +50,15 @@ void set_ver_par(uint8_t id) {
     NPP               = 8;
     DEFAULT_MAX_SPEED = 100 * 25 * 1024;       // 40rpm * 减速比25 * Q10
 
-    INC_PID_POSITION_KP = 3000;
-    INC_PID_POSITION_KI = 9;
+    INC_PID_POSITION_KP = 800;
+    INC_PID_POSITION_KI = 5;
     INC_PID_POSITION_KD = 0;
-    INC_PID_SPEED_KP    = 1500;
-    INC_PID_SPEED_KI    = 10;
+    INC_PID_SPEED_KP    = 500;
+    INC_PID_SPEED_KI    = 4;
     INC_PID_SPEED_KD    = 0;
     POSERRFF_KP         = 300;
-    INC_PID_CURRENT_KP  = 45;                // 保守起步
-    INC_PID_CURRENT_KI  = 4;
+    INC_PID_CURRENT_KP  = 55;                // 保守起步
+    INC_PID_CURRENT_KI  = 3;
     INC_PID_CURRENT_KD  = 0;
   }
   INC_PID_POSITION_LIMIT = DEFAULT_MAX_SPEED;

@@ -41,6 +41,7 @@ extern "C" {
 #define CAN_WLY_ID_SDO_RSP_BASE 0x580
 #define CAN_WLY_ID_SDO_REQ_BASE 0x600
 #define CAN_WLY_ID_CTRL_BASE    0x700
+#define CAN_WLY_ID_EXT_STATUS   0x7FE
 
 /* 控制帧尾字节 (D[7]) */
 #define CAN_WLY_CTRL_ENABLE     0xFA

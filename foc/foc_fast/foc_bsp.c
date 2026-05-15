@@ -867,6 +867,17 @@ void dbg_log_print(void) {
         Reset_objReset_Output_Encoder(0);
         dbgLogFlag = 0;
         break;
+    case 165:
+        /* 查询当前故障标志 */
+        printf("ServoErrFlag = 0x%08lX\r\n", (unsigned long)controller_eyou.ServoErrFlag.All_Flag);
+        if (controller_eyou.ServoErrFlag.All_Flag == 0) {
+            printf("  No faults\r\n");
+        } else {
+            extern void print_fault_types_pub(void);
+            print_fault_types_pub();
+        }
+        dbgLogFlag = 0;
+        break;
     default:
         break;
     }

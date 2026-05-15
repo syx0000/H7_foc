@@ -45,6 +45,12 @@ extern volatile uint8_t USART_CONTROL;
  * 高速时给电流环提供电压基准, 减小 PI 输出, 留电压裕量, 降低过调制概率 */
 #define USE_BEMF_FF 1     // 反电动势前馈使能: 1=开, 0=关
 
+/*速度环陷波滤波器 (消除减速箱机械谐振) */
+#define USE_SPEED_NOTCH 0         // 速度反馈陷波使能: 1=开, 0=关
+#define SPEED_NOTCH_FREQ_HZ  28   // 陷波中心频率 Hz (bwtest2 谐振峰 25~31Hz)
+#define SPEED_NOTCH_BW_HZ   10    // 3dB 带宽 Hz (Q=2.8)
+#define SPEED_NOTCH_PERIOD_US 200  // 速度环采样周期 µs (5kHz)
+
 //弱磁控制
 #define USE_WEAK_MAGN   0     // 弱磁控制使能开关：1开启，0关闭
 #define WEAK_MAGN_DEPTH 500   //弱磁深度单位
@@ -97,8 +103,7 @@ extern volatile uint8_t USART_CONTROL;
 #define LOCKED_MOTOR_SPEED_VALUE (30 * 1024)                   // 9rpm
 #define LOCKED_MOTOR_RECOVER_TIME 10000                        // 10s
 
-#define COMMAND_ARRIVED_Value 128
-#define POSITION_ARRIVED_RANGE 256
+#define POSITION_ARRIVED_RANGE 30     // 位置到达阈值 (单位 1°/1024, 30 ≈ 0.03° 输出端)
 #define SPEED_ARRIVED_RANGE 512
 #define CURRENT_ARRIVED_RANGE 256
 
@@ -410,8 +415,8 @@ typedef struct {
   uint32_t Current_Ki;
   uint32_t Current_Kd;
   int32_t Pid_CurrentLimit;
-  int32_t temp3;               // 预留成员3
-  int32_t temp4;               // 预留成员4
+  int32_t temp3;               // 预留成员3 (Rs 辨识用 Lq)
+  int32_t temp4;               // 预留成员4 (低字节=CAN node_id)
 
   uint16_t ArrivedFlag;             // 指令到达阈值 00||FF为无 其余为有 运行设定，立即生效
   uint16_t PositionArrivedValue;    // 0.1度
@@ -533,6 +538,9 @@ typedef struct {
 
   /*电感辨识*/
   InductanceIdent ident_test;
+
+  /* 速度环陷波滤波器 */
+  biquadFilter_t speed_notch;
 
   /* MIT PD 模式参数 (CAN 0x500 帧写入, FOC 主循环读取) */
   float mit_p_des;     /* 位置目标 [rad] 输出端 */

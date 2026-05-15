@@ -257,6 +257,10 @@ static void print_fault_types(Servo_Flag_Unin flag) {
     if (flag.Bit.flashReadErr)           printf("  [31] FlashReadErr\r\n");
 }
 
+void print_fault_types_pub(void) {
+    print_fault_types(controller_eyou.ServoErrFlag);
+}
+
 /*******************************************************************************
  * 故障分级 - 根据严重程度选择停机方式
  * 严重故障（硬件损坏风险）：立即关 PWM
@@ -397,7 +401,7 @@ uint8_t ClearFaults(uint8_t Fault_clear) {
         if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_15) == GPIO_PIN_SET) {
             TIM1->BDTR |= TIM_BDTR_MOE;
         }
-        printf("All faults cleared, ready to restart\r\n");
+        //printf("All faults cleared, ready to restart\r\n");
     }
     return 0;
 }
@@ -535,11 +539,31 @@ void target_reach_check(void) {
         if ((uint32_t)err < controller_eyou.FlashData.PositionArrivedValue) {
             if (++pos_arrive_cnt >= POSITION_ARRIVED_TIME) {
                 pos_arrive_cnt = POSITION_ARRIVED_TIME;
+                if (!controller_eyou.ServoState.Bit.PositionArrivedFlag) {
+                    printf("[Arrived] pos: ref=%ld cur=%ld err=%ld\r\n",
+                           (long)controller_eyou.position_ref,
+                           (long)controller_eyou.real_position_out,
+                           (long)err);
+                }
                 controller_eyou.ServoState.Bit.PositionArrivedFlag = 1;
             }
         } else {
             pos_arrive_cnt = 0;
             controller_eyou.ServoState.Bit.PositionArrivedFlag = 0;
+        }
+
+        /* 诊断: 未到达时每 500ms 打印一次误差 */
+        static uint16_t notarr_dbg_cnt = 0;
+        if (!controller_eyou.ServoState.Bit.PositionArrivedFlag) {
+            if (++notarr_dbg_cnt >= 500) {
+                notarr_dbg_cnt = 0;
+                printf("[NotArrived] err=%ld cnt=%u thr=%u\r\n",
+                       (long)(controller_eyou.position_ref - controller_eyou.real_position_out),
+                       pos_arrive_cnt,
+                       (unsigned)controller_eyou.FlashData.PositionArrivedValue);
+            }
+        } else {
+            notarr_dbg_cnt = 0;
         }
     } else {
         pos_arrive_cnt = 0;

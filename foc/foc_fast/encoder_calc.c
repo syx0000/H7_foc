@@ -228,10 +228,8 @@ void Encoder_out_data_Reset(int32_t MaxPositionLimit, int32_t MinPositionLimit) 
     /* 根据限位定义初始圈数 */
     if (real_position_out_temp > MaxPositionLimit + 2048) {
         controller_eyou.circle_count_out -= 1;
-        printf("real_position_out circle_count_out -1\r\n");
     } else if (real_position_out_temp < MinPositionLimit - 2048) {
         controller_eyou.circle_count_out += 1;
-        printf("real_position_out circle_count_out +1\r\n");
     }
 
     controller_eyou.real_position_out =

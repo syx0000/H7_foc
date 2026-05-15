@@ -158,8 +158,8 @@ int32_t PosSmoothRun(PositionRefSmooth* p, ControllerStruct* controller) {
   /* 静止状态: 始终从 real_position_out 重锚定 cur_pos, 防上次状态污染.
    * 启动条件 = "目标位置 ≠ 实际位置" (非"ref 变化"), 这样冷启动时
    * old_pos_ref=0 与用户 tar0 重合也能正确启动.
-   * 已对齐判断带 50 LSB (≈0.05°) 死区: 避免 PID 未完全收敛 (real != ref) 时
-   * 反复触发 active=1 重启规划。死区需大于编码器噪声但小于减速箱间隙。
+   * 已对齐判断带 15 LSB (≈0.015°) 死区: 减小到此值, 让 PI 有空间收敛到到达阈值内。
+   * 死区需大于编码器噪声但小于减速箱间隙。
    * cooldown: snap 后 100ms 内不重启, 等 PID 收敛到死区内。
    *           但新指令(position_ref 变化)立即打破 cooldown, 不延迟响应。 */
   if (!p->active) {
@@ -174,7 +174,7 @@ int32_t PosSmoothRun(PositionRefSmooth* p, ControllerStruct* controller) {
     p->cur_pos     = (float)controller->real_position_out;
     p->cur_v       = 0.0f;
     p->old_pos_ref = controller->position_ref;
-    if (labs(controller->position_ref - controller->real_position_out) < 50) {
+    if (labs(controller->position_ref - controller->real_position_out) < 15) {
       p->cur_pos = (float)controller->position_ref;
       return controller->position_ref;    /* 已对齐(死区内), 透传 */
     }
@@ -209,9 +209,16 @@ int32_t PosSmoothRun(PositionRefSmooth* p, ControllerStruct* controller) {
     else                v_new = 0.0f;
   }
 
-  /* V_max 限幅 */
-  if (v_new >  p->v_max)  v_new =  p->v_max;
-  if (v_new < -p->v_max)  v_new = -p->v_max;
+  /* V_max 限幅: 接近目标时降速防过冲
+   * |D| < APPROACH_DIST: 用 V_APPROACH (远低于 v_max), 让动能小不容易过冲 */
+  #define POS_APPROACH_DIST   2048.0f   /* 剩余 <2°(2048 LSB) 进入逼近模式 */
+  #define POS_APPROACH_VMAX   (5.0f * POS_TRAPEZOID_VMAX_SCALE)   /* 5rpm 输出端 */
+  float v_lim = p->v_max;
+  if (fabsf(D) < POS_APPROACH_DIST && v_lim > POS_APPROACH_VMAX) {
+    v_lim = POS_APPROACH_VMAX;
+  }
+  if (v_new >  v_lim)  v_new =  v_lim;
+  if (v_new < -v_lim)  v_new = -v_lim;
 
   p->cur_v   = v_new;
   p->cur_pos += v_new;

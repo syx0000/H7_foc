@@ -82,6 +82,11 @@ void ResetControlData(ControllerStruct* controller) {
 
     extern uint8_t NPP;
     controller->bemf_omega_e_k = (float)NPP * 2.0f * 3.14159265f / (1024.0f * 60.0f);
+
+    #if USE_SPEED_NOTCH
+    biquadFilterInitNotch(&controller->speed_notch,
+                          SPEED_NOTCH_PERIOD_US, SPEED_NOTCH_FREQ_HZ, SPEED_NOTCH_BW_HZ);
+    #endif
 }
 
 /*******************************************************************************
@@ -415,7 +420,7 @@ uint8_t MechAngleOffsetEstimata(ControllerStruct* controller, int32_t UserAngle)
 uint8_t DefualtArrivedValue(ControllerStruct* controller) {
     controller->FlashData.CurrentArrivedValue  = CURRENT_ARRIVED_RANGE;
     controller->FlashData.SpeedArrivedValue    = SPEED_ARRIVED_RANGE;
-    controller->FlashData.PositionArrivedValue = COMMAND_ARRIVED_Value;
+    controller->FlashData.PositionArrivedValue = POSITION_ARRIVED_RANGE;
     return 0;
 }
 

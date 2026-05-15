@@ -163,6 +163,58 @@ static void send_status_frame(void) {
     }
 }
 
+/* ========== 0x7FE 扩展状态帧 (16 字节, 兼容 H7 参考工程) ==========
+ * D[0..1]  电流有效值 (0.01A, uint16 LE)
+ * D[2..3]  速度 (0.1 rpm 输出端, int16 LE)
+ * D[4..7]  位置 (0.001°输出端, int32 LE)
+ * D[8..9]  电机温度 (0.1°C, int16 LE)
+ * D[10..11] MOS 温度 (0.1°C, int16 LE)
+ * D[12]    状态: Bit0=运行, Bit1=故障, Bit2=警告, Bit3=到达位
+ * D[13..15] 保留 = 0
+ */
+static void send_ext_status_frame(void) {
+    uint8_t d[16] = {0};
+
+    /* 电流 RMS: |I_q| / 1024 (A) × 100 → 0.01A */
+    int32_t iq_abs = controller_eyou.I_q;
+    if (iq_abs < 0) iq_abs = -iq_abs;
+    uint16_t i_rms_100 = (uint16_t)((iq_abs * 100) / 1024);
+
+    /* 速度: dtheta_mech_out (rpm×1024 输出端) → 0.1 rpm */
+    int16_t v_int = (int16_t)((controller_eyou.dtheta_mech_out * 10) / 1024);
+
+    /* 位置: real_position_out (1°/1024) → 0.001° */
+    int32_t p_int = (int32_t)(((int64_t)controller_eyou.real_position_out * 1000) / 1024);
+
+    /* 温度: int8 °C → int16 0.1°C (有符号, 负温度也正确) */
+    int16_t temp_motor = (int16_t)motorProValue.motor_temp * 10;
+    int16_t temp_mos   = (int16_t)motorProValue.board_temp * 10;
+
+    d[0] = i_rms_100 & 0xFF;
+    d[1] = (i_rms_100 >> 8) & 0xFF;
+    d[2] = v_int & 0xFF;
+    d[3] = (v_int >> 8) & 0xFF;
+    d[4] = p_int & 0xFF;
+    d[5] = (p_int >> 8) & 0xFF;
+    d[6] = (p_int >> 16) & 0xFF;
+    d[7] = (p_int >> 24) & 0xFF;
+    d[8] = temp_motor & 0xFF;
+    d[9] = (temp_motor >> 8) & 0xFF;
+    d[10] = temp_mos & 0xFF;
+    d[11] = (temp_mos >> 8) & 0xFF;
+
+    uint8_t sta = 0;
+    if (controller_eyou.foc_run) sta |= 0x01;
+    if (controller_eyou.ServoErrFlag.All_Flag) sta |= 0x02;
+    if (motorProValue.board_temp >= (int8_t)Threshold.TemBoradWarn) sta |= 0x04;
+    if (controller_eyou.ServoState.Bit.PositionArrivedFlag) sta |= 0x08;
+    d[12] = sta;
+
+    if (fdcan_send(CAN_WLY_ID_EXT_STATUS, d, 16) != HAL_OK) {
+        s_tx_fail_count++;
+    }
+}
+
 /* 在批量广播帧中查找与自身 ID 匹配的槽位, 返回槽内偏移; -1 表示不在列表中 */
 static int32_t find_slot(const uint8_t *data, uint32_t len, uint32_t slot_size) {
     for (uint32_t off = 0; off + slot_size <= len; off += slot_size) {
@@ -329,8 +381,8 @@ static uint8_t sdo_write_value(uint16_t idx, uint8_t subidx, const uint8_t *in) 
         uint8_t new_id = in[0];
         if (new_id >= CAN_WLY_ID_MIN && new_id <= CAN_WLY_ID_MAX) {
             s_node_id = new_id;
-            /* 保存到 Flash (temp1 低字节) */
-            controller_eyou.FlashData.temp1 = (controller_eyou.FlashData.temp1 & 0xFFFFFF00) | new_id;
+            /* 保存到 Flash (temp4 低字节, 避免与 Rs/temp1 冲突) */
+            controller_eyou.FlashData.temp4 = (controller_eyou.FlashData.temp4 & 0xFFFFFF00) | new_id;
             controller_eyou.UserDataSaveFlag = 1;
             return 1;
         }
@@ -411,7 +463,7 @@ static void handle_ctrl_frame(const uint8_t *data, uint32_t len) {
         Reset_objReset_Output_Encoder(0);
         break;
     case CAN_WLY_CTRL_CLR_ERR:
-        controller_eyou.ServoErrFlag.All_Flag = 0;
+        ClearFaults(1);
         break;
     default:
         return;
@@ -491,8 +543,8 @@ void fdcan_rx_user(uint32_t id, const uint8_t *data, uint32_t len) {
 }
 
 void can_wly_init(void) {
-    /* 从 Flash 恢复节点 ID (存储在 FlashData.temp1 低字节) */
-    uint8_t saved_id = (uint8_t)(controller_eyou.FlashData.temp1 & 0xFF);
+    /* 从 Flash 恢复节点 ID (存储在 FlashData.temp4 低字节, 避免与 Rs/temp1 冲突) */
+    uint8_t saved_id = (uint8_t)(controller_eyou.FlashData.temp4 & 0xFF);
     if (saved_id >= CAN_WLY_ID_MIN && saved_id <= CAN_WLY_ID_MAX) {
         s_node_id = saved_id;
     } else {
@@ -513,9 +565,17 @@ void can_wly_set_node_id(uint8_t id) {
 
 uint32_t can_wly_get_tx_fail_count(void) { return s_tx_fail_count; }
 
-/* 1ms tick: 自动上报 + CAN 超时保护 */
+/* 1ms tick: 自动上报 + CAN 超时保护 + 位置到达上报 */
 void can_wly_tick_1ms(void) {
     if (s_auto_report) send_status_frame();
+
+    /* 位置到达: 上升沿触发一次 0x7FE 扩展状态帧 */
+    static uint8_t pos_arrived_last = 0;
+    uint8_t pos_arrived_now = controller_eyou.ServoState.Bit.PositionArrivedFlag;
+    if (pos_arrived_now && !pos_arrived_last) {
+        send_ext_status_frame();
+    }
+    pos_arrived_last = pos_arrived_now;
 
     if (s_can_timeout_enabled && !g_can_timeout_force_disable && s_can_timeout_cnt > 0) {
         if (--s_can_timeout_cnt == 0) {

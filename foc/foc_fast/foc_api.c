@@ -764,9 +764,6 @@ uint32_t Reset_objReset_Output_Encoder(uint32_t reset) {
 
             Encoder_out_data_Reset(controller_eyou.FlashData.MaxPositionLimit,
                                    controller_eyou.FlashData.MinPositionLimit);
-
-            printf("Output position offset set to %d\n",
-                   (int)controller_eyou.FlashData.mech_offest_out);
         }
     }
 
