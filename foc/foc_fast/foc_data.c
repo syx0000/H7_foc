@@ -301,7 +301,7 @@ uint8_t FlashLimit_Check(Portection_Value* Threshold_buffer) {
    这样 elec_offset 和运行时的 PhaseOrder 严格对应，不会有坐标系不一致的问题 */
 void ElecAngleEstimate(ControllerStruct* controller) {
     uint16_t theta_open[4] = {0, 16383, 32767, 49151};  // 0° 90° 180° 270° 电角度
-    int16_t v_d            = 2048;                       // 2V d轴电压
+    int16_t v_d            = 1024;                       // 1V d轴电压
     int16_t v_q            = 0;
     uint32_t TempPosition[4] = {0};
     int16_t i;

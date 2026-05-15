@@ -122,6 +122,34 @@ void foc_current_close_loop(ControllerStruct* controller) {
     deadtime_compensation(controller);//_3phase
     #endif
 
+  /* 超速保护: 实际速度 > 2550rpm 电机端时, 按比例削减电压输出
+   * 2550~2650rpm: 线性从 100% 削到 0%
+   * >2650rpm: 输出归零
+   * scale 经一阶低通滤波, 避免阈值附近电压跳变产生噪音 */
+  #define OVERSPD_LOW   (2550 * 1024)
+  #define OVERSPD_HIGH  (2650 * 1024)
+  {
+    static int32_t scale_filt = 1024;
+    int32_t spd_abs = controller->dtheta_mech;
+    if (spd_abs < 0) spd_abs = -spd_abs;
+
+    int32_t scale;
+    if (spd_abs <= OVERSPD_LOW) {
+      scale = 1024;
+    } else if (spd_abs >= OVERSPD_HIGH) {
+      scale = 0;
+    } else {
+      scale = (OVERSPD_HIGH - spd_abs) * 1024 / (OVERSPD_HIGH - OVERSPD_LOW);
+    }
+
+    scale_filt += (scale - scale_filt) / 128;
+
+    if (scale_filt < 1024) {
+      controller->V_d = controller->V_d * scale_filt / 1024;
+      controller->V_q = controller->V_q * scale_filt / 1024;
+    }
+  }
+
   //
   limit_norm(&controller->V_d, &controller->V_q, INC_PID_CURRENT_LIMIT);    //
 
