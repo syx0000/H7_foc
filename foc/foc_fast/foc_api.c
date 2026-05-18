@@ -79,11 +79,11 @@ int32_t get_velocity_lim(void) {
     return 0;
 }
 
-int16_t set_torque_ref(int16_t TorRef) {
+int32_t set_torque_ref(int32_t TorRef) {
     if (controller_eyou.ServoState.Bit.PdoRefreshing &&
         (controller_eyou.controller_mode == PROFILE_TORQUE_MODE ||
          controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE)) {
-        int16_t max = (int16_t)controller_eyou.FlashData.MaxCurrent;
+        int32_t max = (int32_t)controller_eyou.FlashData.MaxCurrent;
         if (TorRef >  max) TorRef =  max;
         if (TorRef < -max) TorRef = -max;
         controller_eyou.I_q_ref = TorRef;
@@ -91,8 +91,8 @@ int16_t set_torque_ref(int16_t TorRef) {
     return 1;
 }
 
-int16_t set_torque_ref_loop(int16_t TorRef) {
-    int16_t max = (int16_t)controller_eyou.FlashData.MaxCurrent;
+int32_t set_torque_ref_loop(int32_t TorRef) {
+    int32_t max = (int32_t)controller_eyou.FlashData.MaxCurrent;
     if (TorRef >  max) TorRef =  max;
     if (TorRef < -max) TorRef = -max;
     controller_eyou.I_q_ref = TorRef;

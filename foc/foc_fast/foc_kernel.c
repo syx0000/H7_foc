@@ -84,15 +84,10 @@ void rev_park(int32_t d, int32_t q, int32_t Theta, int32_t* Valpha, int32_t* Vbe
           Ibata=(Ib-Ic)*sqrt(3)/3
 ********************************************************************************/
 void clarke_transf(int32_t I_a, int32_t I_b, int32_t* alpha, int32_t* beta) {
-  int32_t a_divSQRT3_tmp, b_divSQRT3_tmp;
-  int32_t wbeta_tmp;
-  int32_t hbeta_tmp;
-  a_divSQRT3_tmp = divSQRT_3 * (int32_t)I_a;                                      // Q15*Q10
-  b_divSQRT3_tmp = divSQRT_3 * (int32_t)I_b;                                      // Q15*Q10
-  *alpha         = (int32_t)I_a;
-  wbeta_tmp      = (a_divSQRT3_tmp + b_divSQRT3_tmp + b_divSQRT3_tmp) / 32768;    // Q1515
-  hbeta_tmp      = (int32_t)(wbeta_tmp);
-  *beta          = (int32_t)hbeta_tmp;                                            // Q15
+  *alpha = I_a;
+  int64_t a_tmp = (int64_t)divSQRT_3 * I_a;
+  int64_t b_tmp = (int64_t)divSQRT_3 * I_b;
+  *beta = (int32_t)((a_tmp + b_tmp + b_tmp) / 32768);
 }
 
 /*******************************************************************************
@@ -105,16 +100,14 @@ void clarke_transf(int32_t I_a, int32_t I_b, int32_t* alpha, int32_t* beta) {
           Iq=-Ialpha*sin(theta)+Ibata*cos(theta)
 ********************************************************************************/
 void park_transf(int32_t I_alpha, int32_t I_beta, int32_t* d, int32_t* q, int32_t theta) {
-  // IQ15
-  int32_t d_tmp1, d_tmp2, q_tmp1, q_tmp2;
-  Trig_Components Local_Vector_Components;                                      // Q16
-  Local_Vector_Components = get_sincos_value(theta);                            // theta/416
-  d_tmp1                  = I_alpha * (int32_t)Local_Vector_Components.hCos;    // Q15*Q16
-  d_tmp2                  = I_beta * (int32_t)Local_Vector_Components.hSin;
-  *d                      = (int32_t)(((d_tmp1) + (d_tmp2)) / 32768);
-  q_tmp1                  = I_alpha * (int32_t)Local_Vector_Components.hSin;
-  q_tmp2                  = I_beta * (int32_t)Local_Vector_Components.hCos;
-  *q                      = (int32_t)((q_tmp2 - q_tmp1) / 32768);
+  Trig_Components Local_Vector_Components;
+  Local_Vector_Components = get_sincos_value(theta);
+  int64_t d_tmp1 = (int64_t)I_alpha * Local_Vector_Components.hCos;
+  int64_t d_tmp2 = (int64_t)I_beta  * Local_Vector_Components.hSin;
+  *d = (int32_t)((d_tmp1 + d_tmp2) / 32768);
+  int64_t q_tmp1 = (int64_t)I_alpha * Local_Vector_Components.hSin;
+  int64_t q_tmp2 = (int64_t)I_beta  * Local_Vector_Components.hCos;
+  *q = (int32_t)((q_tmp2 - q_tmp1) / 32768);
 }
 
 /*******************************************************************************

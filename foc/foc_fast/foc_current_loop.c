@@ -397,8 +397,8 @@ void CurrentLoopSmoothInit(CurrentLoopSmooth* CurrentSmooth) {
   :
     :
 ********************************************************************************/
-int16_t CurrentLoopSmoothRun(int16_t IqRef, CurrentLoopSmooth* CurrentSmooth) {
-  int16_t Temp = IqRef - CurrentSmooth->NowCurrentRef;
+int32_t CurrentLoopSmoothRun(int32_t IqRef, CurrentLoopSmooth* CurrentSmooth) {
+  int32_t Temp = IqRef - CurrentSmooth->NowCurrentRef;
 
   if (ABS(Temp) <= CurrentSmooth->MaxCurAccEveryPrd)
     CurrentSmooth->NowCurrentRef = IqRef;

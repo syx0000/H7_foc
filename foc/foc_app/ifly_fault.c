@@ -281,17 +281,84 @@ static uint32_t get_critical_fault_mask(void) {
 }
 
 /*******************************************************************************
- * fault_safe_shutdown - 安全关 PWM
- * 中点占空比 → 关 MOE → 清 CCER
+ * 安全停机状态机（对齐 PHU：先零电压矢量滑行 → 低速后短路刹车 → 高阻）
+ * 状态 0: 空闲
+ * 状态 1: 零电压矢量滑行（FOC 仍运行，电流环输出零电压）
+ * 状态 2: 短路刹车（速度已低，CCR=0 下管全开耗散残余磁能）
+ * 状态 3: 完成，关 MOE + CCER 进入 HIGH-Z
  ******************************************************************************/
-static void fault_safe_shutdown(void) {
-    uint32_t period = TIM1->ARR;
-    TIM1->CCR1 = period / 2;
-    TIM1->CCR2 = period / 2;
-    TIM1->CCR3 = period / 2;
-    __DSB();
-    TIM1->BDTR &= ~TIM_BDTR_MOE;
-    TIM1->CCER &= ~0x1555u;
+static volatile uint8_t  s_brake_state = 0;
+static volatile uint16_t s_brake_ticks = 0;
+static volatile uint16_t s_brake_target_ms = 0;
+#define COAST_SPEED_THRESHOLD  51200   /* 载端 2rpm，低于此值可安全短路刹车 */
+#define COAST_TIMEOUT_MS       500     /* 零电压滑行最长 500ms（对齐 PHU） */
+#define BRAKE_FIXED_MS         30      /* 低速短路刹车固定 30ms */
+#define VDC_BRAKE_THRESHOLD    550     /* 母线电压超 55V 延长刹车 */
+
+static void fault_clear_run_data(void);
+
+void fault_brake_tick_1ms(void) {
+    if (s_brake_state == 0) return;
+
+    s_brake_ticks++;
+
+    if (s_brake_state == 1) {
+        /* 状态1: 零电压矢量滑行 — FOC 仍运行，电流环把电流降到零 */
+        controller_eyou.I_q_ref = 0;
+        controller_eyou.I_d_ref = 0;
+        controller_eyou.velocity_ref = 0;
+
+        int32_t spd = controller_eyou.dtheta_mech;
+        if (spd < 0) spd = -spd;
+
+        if ((uint32_t)spd < COAST_SPEED_THRESHOLD || s_brake_ticks >= COAST_TIMEOUT_MS) {
+            /* 速度已低或超时 → 进入短路刹车 */
+            controller_eyou.foc_run = 0;
+            TIM1->CCR1 = 0;
+            TIM1->CCR2 = 0;
+            TIM1->CCR3 = 0;
+            __DSB();
+            s_brake_state = 2;
+            s_brake_target_ms = s_brake_ticks + BRAKE_FIXED_MS;
+            printf("Coast done: %ums, spd=%ld, brake start\r\n",
+                   s_brake_ticks, (long)controller_eyou.dtheta_mech);
+        }
+    } else if (s_brake_state == 2) {
+        /* 状态2: 短路刹车 — 低速下管全开耗散残余磁能 */
+        if (s_brake_ticks >= s_brake_target_ms) {
+            /* 刹车完成 → 关 MOE + CCER 进入高阻 */
+            TIM1->BDTR &= ~TIM_BDTR_MOE;
+            TIM1->CCER &= ~0x1555u;
+            s_brake_state = 3;
+            fault_clear_run_data();
+            uint32_t vdc = getUdc();
+            printf("Shutdown done: %ums total, VDC=%lu.%luV\r\n",
+                   s_brake_ticks, (unsigned long)(vdc/10), (unsigned long)(vdc%10));
+        }
+    }
+}
+
+/*******************************************************************************
+ * fault_safe_shutdown - 启动安全停机状态机（对齐 PHU）
+ * 阶段1: 保持 FOC 运行，清零指令让电流环输出零电压矢量，电机自由滑行
+ * 阶段2: 速度降到安全值后短路刹车耗散残余磁能
+ * 阶段3: 关 MOE 进入高阻
+ ******************************************************************************/
+void fault_safe_shutdown(void) {
+    if (s_brake_state != 0) return;
+
+    /* 进入零电压滑行：保持 foc_run，让电流环继续工作 */
+    controller_eyou.I_q_ref = 0;
+    controller_eyou.I_d_ref = 0;
+    controller_eyou.velocity_ref = 0;
+    controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
+
+    s_brake_state = 1;
+    s_brake_ticks = 0;
+    s_brake_target_ms = 0;
+
+    printf("Safe shutdown: coast phase start (spd=%ld)\r\n",
+           (long)controller_eyou.dtheta_mech);
 }
 
 /*******************************************************************************
@@ -313,17 +380,16 @@ static void fault_clear_run_data(void) {
  * CheckAndHandleAllFaultBits - 故障总分发：扫描所有故障位，触发时停机
  * 仅在错误码变化时上报，避免反复打印同一错误
  *
- * 停机策略（分级）：
- * - 严重故障（OVP/OC/OT/MOSFault）：立即关 PWM，防止硬件损坏
- * - 一般故障：先斜坡减速 100ms（I_q_ref 渐变到 0），再关 PWM
- *   缓解反电动势浪涌，保护母线电容和 MOSFET
+ * 停机策略（保守，保护硬件优先）：
+ * - 严重故障（OVP/OC/OT/MOSFault）：先尝试快速斜坡 50ms，再主动刹车
+ * - 一般故障：斜坡减速 150ms（加长保护时间），再主动刹车
  ******************************************************************************/
 uint8_t CheckAndHandleAllFaultBits(void) {
     static uint32_t last_fault_flag = 0;
     static uint8_t  ramp_down_phase = 0;       /* 0=正常, 1=斜坡减速中 */
     static uint16_t ramp_down_ticks = 0;       /* 减速计数（ms） */
     static int32_t  ramp_down_iq_start = 0;    /* 进入减速时的 I_q_ref */
-    const uint16_t  RAMP_DOWN_MS = 100;        /* 斜坡时间 100ms */
+    static uint16_t ramp_down_target = 0;      /* 目标斜坡时间 */
 
     uint32_t current_fault = controller_eyou.ServoErrFlag.All_Flag;
 
@@ -337,19 +403,17 @@ uint8_t CheckAndHandleAllFaultBits(void) {
     /* 斜坡减速进行中：每次调用（1ms）线性减小 I_q_ref */
     if (ramp_down_phase == 1) {
         ramp_down_ticks++;
-        if (ramp_down_ticks >= RAMP_DOWN_MS) {
-            /* 减速完成，关 PWM */
-            controller_eyou.foc_run = 0;
+        if (ramp_down_ticks >= ramp_down_target) {
+            /* 减速完成，启动安全停机状态机（不立即关 foc_run） */
             fault_safe_shutdown();
-            fault_clear_run_data();
-            printf("Ramp-down done, PWM disabled\r\n");
+            printf("Ramp-down done, entering coast phase\r\n");
             printf("====================================\r\n");
             ramp_down_phase = 0;
             return 1;
         }
         /* 线性递减 I_q_ref */
         controller_eyou.I_q_ref =
-            ramp_down_iq_start * (RAMP_DOWN_MS - ramp_down_ticks) / RAMP_DOWN_MS;
+            ramp_down_iq_start * (ramp_down_target - ramp_down_ticks) / ramp_down_target;
         controller_eyou.velocity_ref = 0;
         controller_eyou.position_ref = 0;
         return 1;
@@ -367,21 +431,21 @@ uint8_t CheckAndHandleAllFaultBits(void) {
                is_critical ? "[CRITICAL]" : "[NORMAL]");
         print_fault_types(controller_eyou.ServoErrFlag);
 
+        /* 保守策略: 严重故障也先尝试快速斜坡, 避免硬切反冲 */
+        ramp_down_phase = 1;
+        ramp_down_ticks = 0;
+        ramp_down_iq_start = controller_eyou.I_q_ref;
+
         if (is_critical) {
-            /* 严重故障：立即关 PWM */
-            controller_eyou.foc_run = 0;
-            fault_safe_shutdown();
-            fault_clear_run_data();
-            printf("CRITICAL fault, PWM immediately disabled\r\n");
-            printf("====================================\r\n");
+            /* 严重故障: 快速斜坡 50ms */
+            ramp_down_target = 50;
+            printf("CRITICAL fault, fast ramp-down %ums (I_q_ref=%ld -> 0)\r\n",
+                   ramp_down_target, (long)ramp_down_iq_start);
         } else {
-            /* 一般故障：进入斜坡减速 */
-            ramp_down_phase = 1;
-            ramp_down_ticks = 0;
-            ramp_down_iq_start = controller_eyou.I_q_ref;
+            /* 一般故障: 保守斜坡 150ms */
+            ramp_down_target = 150;
             printf("Normal fault, ramp-down %ums (I_q_ref=%ld -> 0)\r\n",
-                   RAMP_DOWN_MS, (long)ramp_down_iq_start);
-            /* 不立即关 PWM，让电流环继续工作 */
+                   ramp_down_target, (long)ramp_down_iq_start);
         }
 
         last_fault_flag = current_fault;
@@ -397,6 +461,9 @@ uint8_t ClearFaults(uint8_t Fault_clear) {
     if (Fault_clear) {
         controller_eyou.ServoErrFlag.All_Flag = 0;
         clear_all_fault_counters();
+        /* 复位刹车状态机 */
+        s_brake_state = 0;
+        s_brake_ticks = 0;
         /* BKIN 触发后 MOE=0, 仅当 nFAULT 已释放 (PE15=高) 时恢复 */
         if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_15) == GPIO_PIN_SET) {
             TIM1->BDTR |= TIM_BDTR_MOE;

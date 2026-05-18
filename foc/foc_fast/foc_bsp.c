@@ -387,12 +387,9 @@ void dbg_cmd_set(void) {
             TIM1->CCER |= 0x0555u;
             printf("PWM enabled, mode=Torque, I_q_ref=0 (CCER=0x%04X)\r\n", (unsigned int)TIM1->CCER);
         } else {
-            controller_eyou.I_q_ref = 0;
-            controller_eyou.velocity_ref = 0;
-            controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
-            TIM1->CCER &= ~0x0555u;
-            controller_eyou.foc_run = 0;
-            printf("PWM disabled, foc_run=0 (CCER=0x%04X)\r\n", (unsigned int)TIM1->CCER);
+            /* 安全停机：对齐 PHU 方案（零电压滑行 → 低速刹车 → 高阻） */
+            fault_safe_shutdown();
+            printf("PWM disable requested, safe shutdown initiated\r\n");
         }
     }
 

@@ -98,7 +98,7 @@ extern volatile uint8_t USART_CONTROL;
 #define MECH_OFFSET_ANGLE_IS_UPDATA_FLAG ((uint16_t)0x0064)    // 用户定义零点
 #define FLASH_STRUCT_VERSION 4                                 // FlashSavedData 结构体版本（PhaseOrder 取代 InvertDirflag, elec_offset 单值）
 
-#define LOCKED_MOTOR_CURRENT (15 * 1024)                       // 10A
+#define LOCKED_MOTOR_CURRENT (75 * 1024)                       // 10A
 #define DE_LOCKED_CURRENT (LOCKED_MOTOR_CURRENT / 6)
 #define LOCKED_MOTOR_SPEED_VALUE (30 * 1024)                   // 9rpm
 #define LOCKED_MOTOR_RECOVER_TIME 10000                        // 10s
@@ -130,7 +130,7 @@ extern volatile uint8_t USART_CONTROL;
 #define DEFAULT_RUN_MODE NO_MODE
 
 extern uint32_t MAX_CURRENT_PRE;
-#define DEFAULT_MAX_CURRENT (25 * 1024)    // 120w/48v*38nm/14nm /sqrtf(3)*2 = 7.85A
+#define DEFAULT_MAX_CURRENT (60 * 1024)    // 额定65Nm输出端, 对应电机端~22A, 留裕量60A
 
 // #define DEFAULT_MAX_SPEED                       (30 * 25*1024)   //30rpm
 extern uint32_t DEFAULT_MAX_SPEED;
@@ -153,7 +153,7 @@ extern uint32_t INC_PID_SPEED_KP;
 extern uint32_t INC_PID_SPEED_KI;
 extern uint32_t INC_PID_SPEED_KD;
 extern uint32_t POSERRFF_KP;
-#define INC_PID_SPEED_LIMIT (10 * 1024)    // 速度环输出限幅 10A (原 25A 偏高, 详见过调制对策backlog.md)
+#define INC_PID_SPEED_LIMIT (60 * 1024)    // 速度环输出限幅 60A (额定65Nm需~22A)
 #define DEFAULT_PID_SPEED_DIV 65000
 
 extern uint32_t INC_PID_CURRENT_KP;

@@ -257,6 +257,9 @@ int main(void)
 				CheckAndHandleAllFaultBits();
 			}
 
+			/* 主动刹车状态机 tick */
+			fault_brake_tick_1ms();
+
 			/* 到达判据检测 */
 			target_reach_check();
 		}

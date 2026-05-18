@@ -90,9 +90,9 @@ typedef struct {
 /*******************************************************************************
  * ********************************************************************************/
 typedef struct {
-  int16_t MaxCurAccEveryPrd;
-  int16_t NowCurrentRef;
-  int16_t OldCurrentRef;
+  int32_t MaxCurAccEveryPrd;
+  int32_t NowCurrentRef;
+  int32_t OldCurrentRef;
 
 } CurrentLoopSmooth;
 /*******************************************************************************

@@ -30,9 +30,9 @@ Portection_Value Threshold = {
     .PositionReachTime = 256,
     /* 堵转（保持原值，PHU 风格判据） */
     .BlockTorque       = 1024 * 13,
-    /* 过流（对齐 motor_h7：58A，10 次滤波） */
+    /* 过流（命令限幅60A, 保护留裕量64A） */
     .OverCurrentTime   = 10,         /* 10ms */
-    .OverCurrent       = 59392,      /* 58A (Q10) */
+    .OverCurrent       = 65535,      /* ~64A (Q10), uint16_t max */
     .BlockTime         = 30,
     .BlockSpeed        = 103424,
     .UVWCurrentLimit   = 6860,

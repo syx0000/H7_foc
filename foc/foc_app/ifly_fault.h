@@ -108,6 +108,8 @@ uint8_t LockedRotorProFunc(void);
 uint8_t motorFaultCheck(void);
 uint8_t ClearFaults(uint8_t Fault_clear);    //
 void target_reach_check(void);
+void fault_brake_tick_1ms(void);
+void fault_safe_shutdown(void);
 /* ADC */
 int8_t TemperatureInquiry(uint16_t adc_value);
 

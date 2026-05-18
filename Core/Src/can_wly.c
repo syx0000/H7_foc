@@ -455,11 +455,32 @@ static void handle_ctrl_frame(const uint8_t *data, uint32_t len) {
         TIM1->CCER |= 0x0555u;
         break;
     case CAN_WLY_CTRL_DISABLE:
+        /* 高速/大电流保护: 禁止直接停机, 先强制减速到安全值 */
+        {
+            int32_t spd_abs = controller_eyou.dtheta_mech;
+            if (spd_abs < 0) spd_abs = -spd_abs;
+            int32_t iq_abs = controller_eyou.I_q;
+            if (iq_abs < 0) iq_abs = -iq_abs;
+
+            /* 阈值: 载端 10rpm (256000) 或 15A (15360) */
+            if (spd_abs > 256000 || iq_abs > 15360) {
+                /* 强制切速度模式, 减速到 0 */
+                controller_eyou.controller_mode = PROFILE_VELOCITY_MOCE;
+                controller_eyou.velocity_ref = 0;
+                controller_eyou.I_q_ref = 0;
+                /* 等待 300ms 让速度环减速（保守） */
+                HAL_Delay(300);
+            }
+        }
+
+        /* 斜坡停机: 先清指令让电流环自然衰减, 再触发主动刹车 */
         controller_eyou.I_q_ref = 0;
         controller_eyou.velocity_ref = 0;
         controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
-        TIM1->CCER &= ~0x0555u;
+        /* 延迟 30ms 让电流环 PID 把电流降到接近 0（保守加长） */
+        HAL_Delay(30);
         controller_eyou.foc_run = 0;
+        fault_safe_shutdown();
         break;
     case CAN_WLY_CTRL_SET_ZERO:
         /* 将当前机械位置设为零点 (PHU 接口) */

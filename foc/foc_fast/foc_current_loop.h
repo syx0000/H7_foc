@@ -29,7 +29,7 @@ uint8_t phase_current_sample_Check(ControllerStruct* controller, uint16_t IaSamp
 uint8_t InitCurrentShowFilter(ControllerStruct* controller);
 int32_t ShowFilterGoing(ControllerStruct* controller, str_FILTER1* ShowFilter);
 void CurrentLoopSmoothInit(CurrentLoopSmooth* CurrentSmooth);
-int16_t CurrentLoopSmoothRun(int16_t IqRef, CurrentLoopSmooth* CurrentSmooth);
+int32_t CurrentLoopSmoothRun(int32_t IqRef, CurrentLoopSmooth* CurrentSmooth);
 // void check_u_phase_overcurrent_simple(ControllerStruct* controller);
 void check_phases_overcurrent_timesliced(ControllerStruct* controller);                      //
 void process_single_phase(SimpleOverCurrentDetector* detector, float current, int phase);    //

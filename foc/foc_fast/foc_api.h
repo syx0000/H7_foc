@@ -96,8 +96,8 @@ int32_t get_actual_velocity(void);
 uint8_t set_velocity_ref(int32_t VelRef);
 uint8_t set_velocity_ref_loop(int32_t VelRef);
 int32_t get_velocity_ref(void);
-int16_t set_torque_ref(int16_t TorRef);
-int16_t set_torque_ref_loop(int16_t TorRef);
+int32_t set_torque_ref(int32_t TorRef);
+int32_t set_torque_ref_loop(int32_t TorRef);
 
 int32_t postion_limit_check(int32_t PostionRef);
 int32_t set_postion_ref(int32_t PostionRef);
