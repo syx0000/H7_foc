@@ -43,6 +43,9 @@ extern ControllerStruct controller_eyou;
 extern ifly_Err_Pro_Type motorProValue;
 extern Portection_Value Threshold;
 
+/* forward decl */
+static void can_dbg_push(uint32_t id, const uint8_t *data, uint32_t len, uint8_t dir);
+
 /* ========== 小工具: float <-> uint 定点 ========== */
 static uint32_t float_to_uint(float x, float x_min, float x_max, uint8_t bits) {
     float span = x_max - x_min;
@@ -158,6 +161,7 @@ static void pack_status_frame(uint8_t *d) {
 static void send_status_frame(void) {
     uint8_t d[12];
     pack_status_frame(d);
+    can_dbg_push(CAN_WLY_ID_STATUS_BASE + s_node_id, d, 12, 1);
     if (fdcan_send(CAN_WLY_ID_STATUS_BASE + s_node_id, d, 12) != HAL_OK) {
         s_tx_fail_count++;
     }
@@ -213,6 +217,7 @@ static void send_ext_status_frame(void) {
     if (fdcan_send(CAN_WLY_ID_EXT_STATUS, d, 16) != HAL_OK) {
         s_tx_fail_count++;
     }
+    can_dbg_push(CAN_WLY_ID_EXT_STATUS, d, 16, 1);
 }
 
 /* 在批量广播帧中查找与自身 ID 匹配的槽位, 返回槽内偏移; -1 表示不在列表中 */
@@ -432,6 +437,7 @@ static void handle_sdo_frame(const uint8_t *req, uint32_t len) {
     if (fdcan_send(CAN_WLY_ID_SDO_RSP_BASE + s_node_id, resp, 8) != HAL_OK) {
         s_tx_fail_count++;
     }
+    can_dbg_push(CAN_WLY_ID_SDO_RSP_BASE + s_node_id, resp, 8, 1);
 }
 
 static void handle_ctrl_frame(const uint8_t *data, uint32_t len) {
@@ -476,38 +482,43 @@ static volatile uint32_t s_rx_frame_cnt = 0;
 volatile uint8_t g_can_rx_debug = 0;
 
 /* 环形缓冲: ISR 写, main 循环 print (避免在 ISR 里调 printf 死锁) */
-#define CAN_RX_DBG_BUF_SIZE 8
+#define CAN_DBG_BUF_SIZE 8
 typedef struct {
     uint32_t id;
     uint8_t  data[16];
     uint8_t  len;
-} can_rx_dbg_entry_t;
-static volatile can_rx_dbg_entry_t s_rx_dbg_buf[CAN_RX_DBG_BUF_SIZE];
-static volatile uint8_t s_rx_dbg_wr = 0;
-static volatile uint8_t s_rx_dbg_rd = 0;
+    uint8_t  dir;  /* 0=RX, 1=TX */
+} can_dbg_entry_t;
+static volatile can_dbg_entry_t s_can_dbg_buf[CAN_DBG_BUF_SIZE];
+static volatile uint8_t s_can_dbg_wr = 0;
+static volatile uint8_t s_can_dbg_rd = 0;
+
+static void can_dbg_push(uint32_t id, const uint8_t *data, uint32_t len, uint8_t dir) {
+    if (!g_can_rx_debug) return;
+    uint8_t next = (s_can_dbg_wr + 1) & (CAN_DBG_BUF_SIZE - 1);
+    if (next == s_can_dbg_rd) return;
+    s_can_dbg_buf[s_can_dbg_wr].id  = id;
+    s_can_dbg_buf[s_can_dbg_wr].len = (uint8_t)((len > 16) ? 16 : len);
+    s_can_dbg_buf[s_can_dbg_wr].dir = dir;
+    for (uint8_t i = 0; i < s_can_dbg_buf[s_can_dbg_wr].len; i++)
+        s_can_dbg_buf[s_can_dbg_wr].data[i] = data[i];
+    s_can_dbg_wr = next;
+}
 
 void can_wly_dbg_poll(void) {
-    while (s_rx_dbg_rd != s_rx_dbg_wr) {
-        const can_rx_dbg_entry_t *e = (const can_rx_dbg_entry_t *)&s_rx_dbg_buf[s_rx_dbg_rd];
-        printf("[CAN RX] ID=0x%03X len=%u D=", (unsigned int)e->id, e->len);
+    while (s_can_dbg_rd != s_can_dbg_wr) {
+        const can_dbg_entry_t *e = (const can_dbg_entry_t *)&s_can_dbg_buf[s_can_dbg_rd];
+        printf("[CAN %s] ID=0x%03X len=%u D=",
+               e->dir ? "TX" : "RX", (unsigned int)e->id, e->len);
         for (uint8_t i = 0; i < e->len && i < 16; i++) printf("%02X ", e->data[i]);
         printf("\r\n");
-        s_rx_dbg_rd = (s_rx_dbg_rd + 1) & (CAN_RX_DBG_BUF_SIZE - 1);
+        s_can_dbg_rd = (s_can_dbg_rd + 1) & (CAN_DBG_BUF_SIZE - 1);
     }
 }
 
 void fdcan_rx_user(uint32_t id, const uint8_t *data, uint32_t len) {
     s_rx_frame_cnt++;
-    if (g_can_rx_debug) {
-        uint8_t next = (s_rx_dbg_wr + 1) & (CAN_RX_DBG_BUF_SIZE - 1);
-        if (next != s_rx_dbg_rd) {
-            s_rx_dbg_buf[s_rx_dbg_wr].id = id;
-            s_rx_dbg_buf[s_rx_dbg_wr].len = (uint8_t)((len > 16) ? 16 : len);
-            for (uint8_t i = 0; i < s_rx_dbg_buf[s_rx_dbg_wr].len; i++)
-                s_rx_dbg_buf[s_rx_dbg_wr].data[i] = data[i];
-            s_rx_dbg_wr = next;
-        }
-    }
+    can_dbg_push(id, data, len, 0);
     s_can_timeout_cnt = CAN_TIMEOUT_MS;
     if (!s_can_timeout_enabled) s_can_timeout_enabled = 1;
     /* 广播查询: 所有从站回 0x100+ID */
