@@ -578,7 +578,8 @@ uint32_t can_wly_get_tx_fail_count(void) { return s_tx_fail_count; }
 
 /* 1ms tick: 自动上报 + CAN 超时保护 + 位置到达上报 */
 void can_wly_tick_1ms(void) {
-    if (s_auto_report) send_status_frame();
+    /* 主动上报: 对齐 motor_h7 bDynamMode, 1ms 发 0x7FE 扩展状态帧 (16B) */
+    if (s_auto_report) send_ext_status_frame();
 
     /* 位置到达: 上升沿触发一次 0x7FE 扩展状态帧 */
     static uint8_t pos_arrived_last = 0;
