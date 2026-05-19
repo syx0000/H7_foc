@@ -110,6 +110,9 @@ uint8_t ClearFaults(uint8_t Fault_clear);    //
 void target_reach_check(void);
 void fault_brake_tick_1ms(void);
 void fault_safe_shutdown(void);
+uint8_t fault_brake_is_active(void);  /* 1=刹车状态机进行中, 0=空闲 */
+void drv_reset_tick_1ms(void);
+uint8_t drv_reset_is_active(void);    /* 1=DRV 复位进行中, 0=空闲 */
 /* ADC */
 int8_t TemperatureInquiry(uint16_t adc_value);
 

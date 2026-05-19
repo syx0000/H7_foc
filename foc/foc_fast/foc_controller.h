@@ -33,7 +33,7 @@ extern volatile uint8_t USART_CONTROL;
 #define USE_COMMEND_RC_FILTER 0      //
 /*速度环指令滤波功能*/
 #define USE_SPEED_LOOP_SMOOTH 1    // 使用速度环斜坡滤波
-#define MIN_ACC_TIME 400            // 最小加减速时间,ms
+#define MIN_ACC_TIME 1200            // 最小加减速时间,ms
 
 /*电流环指令滤波功能*/
 #define USE_CURRENT_LOOP_FILTER 1       // 使用电流环斜坡指令滤波0
@@ -43,7 +43,7 @@ extern volatile uint8_t USART_CONTROL;
  *  Vd_ff = -ω_e × Lq × Iq
  *  Vq_ff = +ω_e × Ld × Id + ω_e × ψ_f
  * 高速时给电流环提供电压基准, 减小 PI 输出, 留电压裕量, 降低过调制概率 */
-#define USE_BEMF_FF 1     // 反电动势前馈使能: 1=开, 0=关
+#define USE_BEMF_FF 0     // 反电动势前馈使能: 1=开, 0=关
 
 /*速度环陷波滤波器 (消除减速箱机械谐振) */
 #define USE_SPEED_NOTCH 0         // 速度反馈陷波使能: 1=开, 0=关
@@ -159,7 +159,7 @@ extern uint32_t POSERRFF_KP;
 extern uint32_t INC_PID_CURRENT_KP;
 extern uint32_t INC_PID_CURRENT_KI;
 extern uint32_t INC_PID_CURRENT_KD;
-#define INC_PID_CURRENT_LIMIT (28467)    //(27.8*1024)
+#define INC_PID_CURRENT_LIMIT (28467)    //(27.8*1024) 28467
 // #define VQD_LIMIT                               (27*1024)       //48v*sqrtf(3)/2 = 41.5v
 #define DEFAULT_PID_DIV 100
 

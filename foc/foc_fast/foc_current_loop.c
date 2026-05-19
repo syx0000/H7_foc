@@ -126,6 +126,7 @@ void foc_current_close_loop(ControllerStruct* controller) {
    * 2550~2650rpm: 线性从 100% 削到 0%
    * >2650rpm: 输出归零
    * scale 经一阶低通滤波, 避免阈值附近电压跳变产生噪音 */
+#if 0  /* 关闭: 调试扭矩跑不到额定时排除超速降压干扰 */
   #define OVERSPD_LOW   (2600 * 1024)
   #define OVERSPD_HIGH  (2700 * 1024)
   {
@@ -149,6 +150,7 @@ void foc_current_close_loop(ControllerStruct* controller) {
       controller->V_q = controller->V_q * scale_filt / 1024;
     }
   }
+#endif
 
   //
   limit_norm(&controller->V_d, &controller->V_q, INC_PID_CURRENT_LIMIT);    //

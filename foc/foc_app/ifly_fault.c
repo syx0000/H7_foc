@@ -13,6 +13,7 @@
 #include "foc_api.h"
 #include "foc_data.h"
 #include "main.h"
+#include "usart.h"
 #include <stdio.h>
 
 ifly_Err_Pro_Type motorProValue;
@@ -199,6 +200,9 @@ uint8_t LockedRotorProFunc(void) {
  * 软件层读 BIF 位同步故障标志，并尝试恢复 MOE（清错后）
  ******************************************************************************/
 uint8_t driverChipFaultCheck(void) {
+    /* DRV 异步复位进行中, 跳过检测 (复位期间 EN_GATE=0, BIF 仍可能被置位) */
+    if (drv_reset_is_active()) return 0;
+
     if (TIM1->SR & TIM_SR_BIF) {
         TIM1->SR = ~TIM_SR_BIF;
         controller_eyou.ServoErrFlag.Bit.DriverChipNfault = 1;
@@ -290,6 +294,7 @@ static uint32_t get_critical_fault_mask(void) {
 static volatile uint8_t  s_brake_state = 0;
 static volatile uint16_t s_brake_ticks = 0;
 static volatile uint16_t s_brake_target_ms = 0;
+static volatile uint8_t  s_brake_user_initiated = 0;  /* 1=用户主动停机, 0=故障触发 */
 #define COAST_SPEED_THRESHOLD  51200   /* 载端 2rpm，低于此值可安全短路刹车 */
 #define COAST_TIMEOUT_MS       500     /* 零电压滑行最长 500ms（对齐 PHU） */
 #define BRAKE_FIXED_MS         30      /* 低速短路刹车固定 30ms */
@@ -303,7 +308,10 @@ void fault_brake_tick_1ms(void) {
     s_brake_ticks++;
 
     if (s_brake_state == 1) {
-        /* 状态1: 零电压矢量滑行 — FOC 仍运行，电流环把电流降到零 */
+        /* 状态1: 零电压矢量滑行 — 统一切扭矩模式 + 清电流指令
+         * 电流环 PI 自然把 I_q 降到 0, SVPWM 输出零电压矢量 (CCR≈PWM_T/4)
+         * 不做主动制动, 避免故障路径下速度环重新喷电流 */
+        controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
         controller_eyou.I_q_ref = 0;
         controller_eyou.I_d_ref = 0;
         controller_eyou.velocity_ref = 0;
@@ -311,8 +319,8 @@ void fault_brake_tick_1ms(void) {
         int32_t spd = controller_eyou.dtheta_mech;
         if (spd < 0) spd = -spd;
 
-        if ((uint32_t)spd < COAST_SPEED_THRESHOLD || s_brake_ticks >= COAST_TIMEOUT_MS) {
-            /* 速度已低或超时 → 进入短路刹车 */
+        if ((uint32_t)spd < COAST_SPEED_THRESHOLD) {
+            /* 速度已低 → 安全进入短路刹车 */
             controller_eyou.foc_run = 0;
             TIM1->CCR1 = 0;
             TIM1->CCR2 = 0;
@@ -322,6 +330,23 @@ void fault_brake_tick_1ms(void) {
             s_brake_target_ms = s_brake_ticks + BRAKE_FIXED_MS;
             printf("Coast done: %ums, spd=%ld, brake start\r\n",
                    s_brake_ticks, (long)controller_eyou.dtheta_mech);
+        } else if (s_brake_ticks >= COAST_TIMEOUT_MS) {
+            /* 超时但速度仍高: 短路刹车会产生大电流击穿 DRV
+             * 直接高阻让 BEMF 自然衰减, 跳过短路阶段 */
+            controller_eyou.foc_run = 0;
+            TIM1->BDTR &= ~TIM_BDTR_MOE;
+            TIM1->CCER &= ~0x1555u;
+            __DSB();
+            fault_clear_run_data();
+            /* 用户主动停机: 清除 coast 期间可能触发的故障标志 (堵转/OVP 等) */
+            if (s_brake_user_initiated) {
+                controller_eyou.ServoErrFlag.All_Flag = 0;
+            }
+            printf("Coast TIMEOUT at high spd=%ld, hi-Z directly (skip brake)\r\n",
+                   (long)controller_eyou.dtheta_mech);
+            s_brake_state = 0;
+            s_brake_ticks = 0;
+            s_brake_target_ms = 0;
         }
     } else if (s_brake_state == 2) {
         /* 状态2: 短路刹车 — 低速下管全开耗散残余磁能 */
@@ -329,36 +354,56 @@ void fault_brake_tick_1ms(void) {
             /* 刹车完成 → 关 MOE + CCER 进入高阻 */
             TIM1->BDTR &= ~TIM_BDTR_MOE;
             TIM1->CCER &= ~0x1555u;
-            s_brake_state = 3;
             fault_clear_run_data();
+            /* 用户主动停机: 清除 coast 期间可能触发的故障标志 (堵转/OVP 等) */
+            if (s_brake_user_initiated) {
+                controller_eyou.ServoErrFlag.All_Flag = 0;
+            }
             uint32_t vdc = getUdc();
             printf("Shutdown done: %ums total, VDC=%lu.%luV\r\n",
                    s_brake_ticks, (unsigned long)(vdc/10), (unsigned long)(vdc%10));
+            /* 状态机回到空闲, 允许后续启动 */
+            s_brake_state = 0;
+            s_brake_ticks = 0;
+            s_brake_target_ms = 0;
         }
     }
 }
 
 /*******************************************************************************
  * fault_safe_shutdown - 启动安全停机状态机（对齐 PHU）
- * 阶段1: 保持 FOC 运行，清零指令让电流环输出零电压矢量，电机自由滑行
+ * 阶段1: 零电压矢量滑行 — 电流环自然衰减, 不做主动制动
  * 阶段2: 速度降到安全值后短路刹车耗散残余磁能
  * 阶段3: 关 MOE 进入高阻
  ******************************************************************************/
 void fault_safe_shutdown(void) {
     if (s_brake_state != 0) return;
 
-    /* 进入零电压滑行：保持 foc_run，让电流环继续工作 */
+    /* 统一切扭矩模式 + 清电流指令, FOC 保持运行让电流环把 I_q 调到 0 */
+    controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
     controller_eyou.I_q_ref = 0;
     controller_eyou.I_d_ref = 0;
     controller_eyou.velocity_ref = 0;
-    controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
 
     s_brake_state = 1;
     s_brake_ticks = 0;
     s_brake_target_ms = 0;
+    s_brake_user_initiated = 1;  /* 默认用户主动停机, 故障路径会覆盖为 0 */
 
-    printf("Safe shutdown: coast phase start (spd=%ld)\r\n",
-           (long)controller_eyou.dtheta_mech);
+    {
+        char _buf[64];
+        snprintf(_buf, sizeof(_buf), "Safe shutdown: coast phase start (spd=%ld)\r\n",
+                 (long)controller_eyou.dtheta_mech);
+        isr_print(_buf);
+    }
+}
+
+/*******************************************************************************
+ * fault_brake_is_active - 查询刹车状态机是否进行中
+ * 返回: 1=进行中（coast/brake/shutdown 任一阶段）, 0=空闲
+ ******************************************************************************/
+uint8_t fault_brake_is_active(void) {
+    return (s_brake_state != 0) ? 1 : 0;
 }
 
 /*******************************************************************************
@@ -406,16 +451,15 @@ uint8_t CheckAndHandleAllFaultBits(void) {
         if (ramp_down_ticks >= ramp_down_target) {
             /* 减速完成，启动安全停机状态机（不立即关 foc_run） */
             fault_safe_shutdown();
+            s_brake_user_initiated = 0;  /* 故障触发的停机, 不自动清 ServoErrFlag */
             printf("Ramp-down done, entering coast phase\r\n");
             printf("====================================\r\n");
             ramp_down_phase = 0;
             return 1;
         }
-        /* 线性递减 I_q_ref */
+        /* 线性递减 I_q_ref (mode 已强制为 TORQUE, 速度/位置环不会覆盖 I_q_ref) */
         controller_eyou.I_q_ref =
             ramp_down_iq_start * (ramp_down_target - ramp_down_ticks) / ramp_down_target;
-        controller_eyou.velocity_ref = 0;
-        controller_eyou.position_ref = 0;
         return 1;
     }
 
@@ -430,6 +474,14 @@ uint8_t CheckAndHandleAllFaultBits(void) {
                (unsigned long)last_fault_flag,
                is_critical ? "[CRITICAL]" : "[NORMAL]");
         print_fault_types(controller_eyou.ServoErrFlag);
+
+        /* 立即切扭矩模式 + 锚定 ref, 防止位置/速度环在斜坡期间抢 I_q_ref:
+         * - 若 mode 是 POSITION, 不切的话 position_ref=0 会让电机飞向零位
+         * - 若 mode 是 VELOCITY, 不切的话 velocity_ref=0 会触发速度环反向制动
+         * 切到 TORQUE 后, 位置/速度环只走透传分支, 不再写 I_q_ref */
+        controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
+        controller_eyou.position_ref    = controller_eyou.real_position_out;
+        controller_eyou.velocity_ref    = 0;
 
         /* 保守策略: 严重故障也先尝试快速斜坡, 避免硬切反冲 */
         ramp_down_phase = 1;
@@ -455,20 +507,79 @@ uint8_t CheckAndHandleAllFaultBits(void) {
 }
 
 /*******************************************************************************
+ * DRV8353 异步复位状态机 (toggle EN_GATE 清锁存故障)
+ * 状态 0: 空闲
+ * 状态 1: EN_GATE 拉低保持 (≥1ms, DRV 进入 sleep)
+ * 状态 2: EN_GATE 拉高等待 (≥1ms, DRV 重新初始化 tWAKE)
+ * 复位完成后清 BIF + 清 ServoErrFlag
+ ******************************************************************************/
+static volatile uint8_t  s_drv_reset_state = 0;
+static volatile uint16_t s_drv_reset_ticks = 0;
+#define DRV_RESET_LOW_MS   3
+#define DRV_RESET_WAIT_MS  3
+
+uint8_t drv_reset_is_active(void) {
+    return (s_drv_reset_state != 0) ? 1 : 0;
+}
+
+void drv_reset_tick_1ms(void) {
+    if (s_drv_reset_state == 0) return;
+    s_drv_reset_ticks++;
+
+    if (s_drv_reset_state == 1) {
+        if (s_drv_reset_ticks >= DRV_RESET_LOW_MS) {
+            HAL_GPIO_WritePin(EN_GATE_GPIO_Port, EN_GATE_Pin, GPIO_PIN_SET);
+            s_drv_reset_state = 2;
+            s_drv_reset_ticks = 0;
+        }
+    } else if (s_drv_reset_state == 2) {
+        if (s_drv_reset_ticks >= DRV_RESET_WAIT_MS) {
+            /* DRV 已重新初始化, 清 BIF + ServoErrFlag, 看 nFAULT 是否真的恢复 */
+            TIM1->SR = ~TIM_SR_BIF;
+            __DSB();
+            controller_eyou.ServoErrFlag.All_Flag = 0;
+            clear_all_fault_counters();
+
+            uint8_t pe15 = (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_15) == GPIO_PIN_SET);
+            printf("DRV reset done, nFAULT(PE15)=%s\r\n", pe15 ? "HIGH (OK)" : "LOW (still fault)");
+            s_drv_reset_state = 0;
+            s_drv_reset_ticks = 0;
+        }
+    }
+}
+
+/*******************************************************************************
  * ClearFaults - 故障复位（清除所有故障标志）
+ * 安全要求: 清错后 PWM 必须处于安全状态 (MOE=0 高阻)
+ * - 若 brake state 进行中, 先强行收尾把 PWM 关到高阻
+ * - 若 nFAULT 仍触发 (PE15=低), 启动异步 DRV 复位 (toggle EN_GATE)
+ * - 不主动恢复 MOE: 用户必须显式 enable1/Runcmd1 重新启动
  ******************************************************************************/
 uint8_t ClearFaults(uint8_t Fault_clear) {
     if (Fault_clear) {
+        /* 若刹车状态机进行中, 强行把 PWM 整理到安全状态再清状态机 */
+        if (s_brake_state != 0) {
+            controller_eyou.foc_run = 0;
+            TIM1->BDTR &= ~TIM_BDTR_MOE;
+            TIM1->CCER &= ~0x1555u;
+            __DSB();
+            fault_clear_run_data();
+        }
+
         controller_eyou.ServoErrFlag.All_Flag = 0;
         clear_all_fault_counters();
-        /* 复位刹车状态机 */
         s_brake_state = 0;
         s_brake_ticks = 0;
-        /* BKIN 触发后 MOE=0, 仅当 nFAULT 已释放 (PE15=高) 时恢复 */
-        if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_15) == GPIO_PIN_SET) {
-            TIM1->BDTR |= TIM_BDTR_MOE;
+        s_brake_target_ms = 0;
+
+        /* DRV nFAULT 持续触发时启动异步 toggle EN_GATE 复位
+         * 同步阻塞会让 CAN ISR 死锁 (CAN_WLY_CTRL_CLR_ERR 路径) */
+        if (s_drv_reset_state == 0 &&
+            HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_15) == GPIO_PIN_RESET) {
+            HAL_GPIO_WritePin(EN_GATE_GPIO_Port, EN_GATE_Pin, GPIO_PIN_RESET);
+            s_drv_reset_state = 1;
+            s_drv_reset_ticks = 0;
         }
-        //printf("All faults cleared, ready to restart\r\n");
     }
     return 0;
 }

@@ -418,8 +418,8 @@ uint32_t DWT_CyclesToUs(uint32_t cycles)
   */
 void TIM1_PWM_Start(void)
 {
-    /* 使能主输出(MOE)和自动输出使能(AOE) */
-    TIM1->BDTR |= TIM_BDTR_MOE | TIM_BDTR_AOE;
+    /* 使能主输出(MOE)，不开 AOE：软件关 MOE 后不应被定时器自动恢复 */
+    TIM1->BDTR |= TIM_BDTR_MOE;
 
     /* 使能更新中断 */
     TIM1->DIER |= TIM_DIER_UIE;

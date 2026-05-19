@@ -337,14 +337,39 @@ void dbg_cmd_set(void) {
     if (NULL != strstr((char *)dbgRecvBuf, "Run")) {
         loc                     = strstr((char *)dbgRecvBuf, "cmd");
         token                   = strtok(loc, "cmd");
-        controller_eyou.foc_run = atoi(token);
+        int cmd_val             = atoi(token);
 
         loc                             = strstr((char *)dbgRecvBuf, "M");
         token                           = strtok(loc, "M");
-        controller_eyou.controller_mode = atoi(token);
+        int mode_val                    = atoi(token);
         loc                             = strstr((char *)dbgRecvBuf, "tar");
         token                           = strtok(loc, "tar");
         int32_t Data                    = atoi(token);
+
+        /* cmd=0 视为停机命令, 走主动刹车流程, 不直接 foc_run=0 (会让 PWM 卡死在上次 CCR) */
+        if (cmd_val == 0) {
+            fault_safe_shutdown();
+            printf("Runcmd0: safe shutdown initiated\r\n");
+            return;
+        }
+
+        /* 启动前检查: 刹车进行中 / 故障未清 → 静默拒绝 (不打印, 避免上位机周期发命令时刷屏)
+         * 用户要清错请发 logid163 */
+        if (fault_brake_is_active()) return;
+        if (controller_eyou.ServoErrFlag.All_Flag != 0) return;
+
+        /* 区分"首次启动"和"运行中改目标":
+         * 已在跑且模式不变 → 只改目标值, 不重置 PID (避免积分器清零导致抖动)
+         * 首次启动或切模式 → 完整重置 */
+        uint8_t already_running = (controller_eyou.foc_run >= 1 &&
+                                   controller_eyou.controller_mode == mode_val);
+        if (!already_running) {
+            ResetControlData(&controller_eyou);
+            controller_eyou.foc_run         = cmd_val;
+            controller_eyou.controller_mode = mode_val;
+            TIM1->BDTR |= TIM_BDTR_MOE;
+            TIM1->CCER |= 0x0555u;
+        }
 
         if (controller_eyou.controller_mode == PROFILE_TORQUE_MODE ||
             controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE) {
@@ -379,13 +404,25 @@ void dbg_cmd_set(void) {
         int en = atoi(token);
 
         if (en) {
-            controller_eyou.I_q_ref = 0;
-            controller_eyou.velocity_ref = 0;
-            controller_eyou.position_ref = controller_eyou.real_position_out;
-            controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
-            controller_eyou.foc_run = 2;
-            TIM1->CCER |= 0x0555u;
-            printf("PWM enabled, mode=Torque, I_q_ref=0 (CCER=0x%04X)\r\n", (unsigned int)TIM1->CCER);
+            /* 启动前检查: 刹车进行中 / 故障未清 → 拒绝启动 */
+            if (fault_brake_is_active()) {
+                printf("enable: brake in progress, ignored\r\n");
+            } else if (controller_eyou.ServoErrFlag.All_Flag != 0) {
+                printf("enable: fault active (0x%08lX), clear first\r\n",
+                       (unsigned long)controller_eyou.ServoErrFlag.All_Flag);
+            } else {
+                /* 重置 PID 积分, 避免历史残留导致首拍喷大扭矩 */
+                ResetControlData(&controller_eyou);
+                controller_eyou.I_q_ref = 0;
+                controller_eyou.velocity_ref = 0;
+                controller_eyou.position_ref = controller_eyou.real_position_out;
+                controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
+                controller_eyou.foc_run = 2;
+                /* 恢复 MOE (上次刹车结束时清掉了) + 打开 PWM 通道 */
+                TIM1->BDTR |= TIM_BDTR_MOE;
+                TIM1->CCER |= 0x0555u;
+                printf("PWM enabled, mode=Torque, I_q_ref=0 (CCER=0x%04X)\r\n", (unsigned int)TIM1->CCER);
+            }
         } else {
             /* 安全停机：对齐 PHU 方案（零电压滑行 → 低速刹车 → 高阻） */
             fault_safe_shutdown();

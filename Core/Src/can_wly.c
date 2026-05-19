@@ -6,6 +6,7 @@
 #include "fdcan.h"
 #include "foc_api.h"
 #include "foc_controller.h"
+#include "foc_data.h"
 #include "foc_bsp.h"
 #include "ifly_fault.h"
 #include "ifly_fault_api.h"
@@ -169,7 +170,7 @@ static void send_status_frame(void) {
 
 /* ========== 0x7FE 扩展状态帧 (16 字节, 兼容 H7 参考工程) ==========
  * D[0..1]  电流有效值 (0.01A, uint16 LE)
- * D[2..3]  速度 (0.1 rpm 输出端, int16 LE)
+ * D[2..3]  速度 (0.1 输出端 rpm, int16 LE)
  * D[4..7]  位置 (0.001°输出端, int32 LE)
  * D[8..9]  电机温度 (0.1°C, int16 LE)
  * D[10..11] MOS 温度 (0.1°C, int16 LE)
@@ -184,8 +185,9 @@ static void send_ext_status_frame(void) {
     if (iq_abs < 0) iq_abs = -iq_abs;
     uint16_t i_rms_100 = (uint16_t)((iq_abs * 100) / 1024);
 
-    /* 速度: dtheta_mech_out (rpm×1024 输出端) → 0.1 rpm */
-    int16_t v_int = (int16_t)((controller_eyou.dtheta_mech_out * 10) / 1024);
+    /* 速度: dtheta_mech_out (电机端 rpm×1024, 经减速比 25 折算到电机端) → 0.1 输出端 rpm
+     * 协议要的是输出端 rpm × 10, 所以再除以减速比 25 */
+    int16_t v_int = (int16_t)((controller_eyou.dtheta_mech_out * 10) / (1024 * 25));
 
     /* 位置: real_position_out (1°/1024) → 0.001° */
     int32_t p_int = (int32_t)(((int64_t)controller_eyou.real_position_out * 1000) / 1024);
@@ -447,39 +449,29 @@ static void handle_ctrl_frame(const uint8_t *data, uint32_t len) {
     }
     switch (data[7]) {
     case CAN_WLY_CTRL_ENABLE:
+        /* 启动前检查: 刹车进行中 / 故障未清 → 拒绝启动 */
+        if (fault_brake_is_active()) {
+            return;  /* 刹车状态机进行中, 忽略启动 */
+        }
+        if (controller_eyou.ServoErrFlag.All_Flag != 0) {
+            return;  /* 有未清故障, 必须先 CLR_ERR */
+        }
+        /* 重置 PID 积分, 避免历史残留导致首拍喷大扭矩 */
+        ResetControlData(&controller_eyou);
         controller_eyou.I_q_ref = 0;
         controller_eyou.velocity_ref = 0;
         controller_eyou.position_ref = controller_eyou.real_position_out;
         controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
         controller_eyou.foc_run = 2;
+        /* 恢复 MOE (上次刹车结束时清掉了) + 打开 PWM 通道 */
+        TIM1->BDTR |= TIM_BDTR_MOE;
         TIM1->CCER |= 0x0555u;
         break;
     case CAN_WLY_CTRL_DISABLE:
-        /* 高速/大电流保护: 禁止直接停机, 先强制减速到安全值 */
-        {
-            int32_t spd_abs = controller_eyou.dtheta_mech;
-            if (spd_abs < 0) spd_abs = -spd_abs;
-            int32_t iq_abs = controller_eyou.I_q;
-            if (iq_abs < 0) iq_abs = -iq_abs;
-
-            /* 阈值: 载端 10rpm (256000) 或 15A (15360) */
-            if (spd_abs > 256000 || iq_abs > 15360) {
-                /* 强制切速度模式, 减速到 0 */
-                controller_eyou.controller_mode = PROFILE_VELOCITY_MOCE;
-                controller_eyou.velocity_ref = 0;
-                controller_eyou.I_q_ref = 0;
-                /* 等待 300ms 让速度环减速（保守） */
-                HAL_Delay(300);
-            }
-        }
-
-        /* 斜坡停机: 先清指令让电流环自然衰减, 再触发主动刹车 */
-        controller_eyou.I_q_ref = 0;
-        controller_eyou.velocity_ref = 0;
-        controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
-        /* 延迟 30ms 让电流环 PID 把电流降到接近 0（保守加长） */
-        HAL_Delay(30);
-        controller_eyou.foc_run = 0;
+        /* 直接进入安全停机状态机 (coast→brake→shutdown).
+         * 不能用 HAL_Delay: 此函数在 FDCAN1_IT0 ISR (优先级 6) 里执行,
+         * 会屏蔽 TIM7 (优先级 15) 的 HAL Timebase 导致 HAL_Delay 死锁,
+         * 同时阻塞 CAN FIFO 引发溢出/BusOff. */
         fault_safe_shutdown();
         break;
     case CAN_WLY_CTRL_SET_ZERO:

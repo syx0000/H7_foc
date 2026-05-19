@@ -242,11 +242,11 @@ int main(void)
 
 			/* 故障检测 */
 			dcVoltageProFunc();          // 母线过/欠压
-			boradTempProFunc();          // 板温过温
-			busOverCurrentCheck();       // 母线过流
-			LockedRotorProFunc();        // 堵转检测
-			driverChipFaultCheck();      // DRV8353 nFAULT 引脚
-			motorSpeedOverCheck();       // 过速检测
+			// boradTempProFunc();          // 板温过温
+			// busOverCurrentCheck();       // 母线过流
+			// LockedRotorProFunc();        // 堵转检测
+			//driverChipFaultCheck();      // DRV8353 nFAULT 引脚
+			//motorSpeedOverCheck();       // 过速检测
 //			motorSpeedOffsetCheck();     // 速度跟随偏差
 //			motorPosOffsetCheck();       // 位置跟随偏差
 //			motorCurrentOffsetCheck();   // 电流跟随偏差
@@ -259,6 +259,9 @@ int main(void)
 
 			/* 主动刹车状态机 tick */
 			fault_brake_tick_1ms();
+
+			/* DRV8353 异步复位状态机 tick */
+			drv_reset_tick_1ms();
 
 			/* 到达判据检测 */
 			target_reach_check();

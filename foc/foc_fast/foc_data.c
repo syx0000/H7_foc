@@ -179,6 +179,8 @@ uint8_t InitFlashData(ControllerStruct* controller) {
         DefualtRunDataValue(controller);
         Temp++;
     }
+    /* MaxCurrent 每次上电从源码强制覆盖, 允许改宏后立即生效 (不依赖 Flash version) */
+    controller->FlashData.MaxCurrent = DEFAULT_MAX_CURRENT;
 
     /* 8. 保护功能开关 */
     if ((controller->FlashData.ProteckKeyFlag == 0xFFFF) ||

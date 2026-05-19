@@ -42,14 +42,18 @@ void Test_log_print(void) {
   if (controller_eyou.bw_test.done) {
     bw_test_print_results(&controller_eyou.bw_test);
     controller_eyou.bw_test.done = 0;
+    /* 测试结束后走安全停机, 防止 PWM 卡死在最后一拍 CCR 状态 */
+    fault_safe_shutdown();
   }
   if (controller_eyou.spd_bw_test.done) {
     spd_bw_test_print_results(&controller_eyou.spd_bw_test);
     controller_eyou.spd_bw_test.done = 0;
+    fault_safe_shutdown();
   }
   if (controller_eyou.pos_bw_test.done) {
     pos_bw_test_print_results(&controller_eyou.pos_bw_test);
     controller_eyou.pos_bw_test.done = 0;
+    fault_safe_shutdown();
   }
 }
 
