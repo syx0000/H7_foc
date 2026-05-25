@@ -58,7 +58,7 @@ typedef int32_t  INT32;
 // I_Q10 = I * 1024 = (raw - offset) * 3.3 * 1024 / 65535 / 10 / 0.0025
 //       ≈ (raw - offset) * 33 / 16   (误差 <0.01%)
 #define CURRENT_TRANS_NUMERATOR 33
-#define CURRENT_TRANS_DENOMINATOR 16
+#define CURRENT_TRANS_DENOMINATOR 8
 
 //
 // 编码器分辨率常量 - DPT 双磁编码器 24位

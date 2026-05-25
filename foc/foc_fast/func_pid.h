@@ -40,6 +40,7 @@ typedef struct IncPID {
 
   int32_t InPut;        //
   int32_t OutPut;       //
+  uint8_t saturated;    // anti-windup: 外部设置，1=输出饱和，冻结积分
 } IncPID;
 
 void Init_IncPID(IncPID* pid, uint32_t Kp, uint32_t Ki, uint32_t Kd, uint16_t PID_Div, int32_t OutMax);

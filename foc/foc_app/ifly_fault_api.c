@@ -28,14 +28,14 @@ Portection_Value Threshold = {
     .velocity_coe      = 1,
     .PositionErr       = 2048 * 20,
     .PositionReachTime = 256,
-    /* 堵转（保持原值，PHU 风格判据） */
-    .BlockTorque       = 1024 * 13,
-    /* 过流（命令限幅60A, 保护留裕量64A） */
+    /* 堵转（电流>阈值 且 速度<阈值 → 堵转保护） */
+    .BlockTorque       = 1024 * 38,
+    /* 过流（速度环限幅35A，保护阈值留裕量40A） */
     .OverCurrentTime   = 10,         /* 10ms */
-    .OverCurrent       = 65535,      /* ~64A (Q10), uint16_t max */
+    .OverCurrent       = 40960,      /* 40A (Q10) */
     .BlockTime         = 30,
     .BlockSpeed        = 103424,
-    .UVWCurrentLimit   = 6860,
+    .UVWCurrentLimit   = 46080,    // 45A Q10 (速度环限幅35A + 动态裕量)
 };
 int8_t brake_control_flag;
 

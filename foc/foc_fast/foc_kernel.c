@@ -237,7 +237,8 @@ void svpwm_calc(int32_t Valpha, int32_t Vbeta, uint32_t* CCR1, uint32_t* CCR2, u
     :
 ********************************************************************************/
 void limit_norm(int32_t* x, int32_t* y, int16_t limit) {
-  uint16_t norm = qsqrt(*x * *x + *y * *y);
+   uint32_t norm_sq = (uint32_t)((int64_t)(*x) * (*x) + (int64_t)(*y) * (*y));
+  uint16_t norm = qsqrt(norm_sq);
 
   if (norm > limit) {
     *x = *x * limit / norm;

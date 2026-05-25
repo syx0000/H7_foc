@@ -28,11 +28,16 @@ int32_t IncPIDCal(IncPID* pid) {
   }
 
   pid->InPut = pid->iError;
-  // int64 中间变量防溢出：P/I/D 都是 int16，e 是 int32，clamp 后 |e-e_last| 可达 2*PID_INPUT_LIMIT≈4M；
-  // 当 P ≥ 512 时 P*(e-e_last) 会超 INT32_MAX，先升 int64 再除回 int32
-  int64_t numerator = (int64_t)pid->P * (pid->iError - pid->LastError)
-                    + (int64_t)pid->I * pid->iError
-                    + (int64_t)pid->D * (pid->iError - 2 * pid->LastError + pid->PrevError);
+  // anti-windup: 电压饱和且误差方向会加剧饱和时，跳过积分项
+  int64_t numerator;
+  if (pid->saturated) {
+    numerator = (int64_t)pid->P * (pid->iError - pid->LastError)
+              + (int64_t)pid->D * (pid->iError - 2 * pid->LastError + pid->PrevError);
+  } else {
+    numerator = (int64_t)pid->P * (pid->iError - pid->LastError)
+              + (int64_t)pid->I * pid->iError
+              + (int64_t)pid->D * (pid->iError - 2 * pid->LastError + pid->PrevError);
+  }
   Output = (int32_t)(numerator / pid->PID_Div);
   pid->PrevError = pid->LastError;    //
   pid->LastError = pid->iError;

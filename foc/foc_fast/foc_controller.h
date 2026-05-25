@@ -37,13 +37,13 @@ extern volatile uint8_t USART_CONTROL;
 
 /*电流环指令滤波功能*/
 #define USE_CURRENT_LOOP_FILTER 1       // 使用电流环斜坡指令滤波0
-#define CURRENT_LOOP_MIN_ACC_TIME 10    // 电流环滤波时间ms
+#define CURRENT_LOOP_MIN_ACC_TIME 40    // 电流环滤波时间ms
 
 /*反电动势前馈 (BEMF Feed-Forward)
  *  Vd_ff = -ω_e × Lq × Iq
  *  Vq_ff = +ω_e × Ld × Id + ω_e × ψ_f
  * 高速时给电流环提供电压基准, 减小 PI 输出, 留电压裕量, 降低过调制概率 */
-#define USE_BEMF_FF 0     // 反电动势前馈使能: 1=开, 0=关
+#define USE_BEMF_FF 1     // 反电动势前馈使能: 1=开, 0=关
 
 /*速度环陷波滤波器 (消除减速箱机械谐振) */
 #define USE_SPEED_NOTCH 0         // 速度反馈陷波使能: 1=开, 0=关
@@ -57,10 +57,10 @@ extern volatile uint8_t USART_CONTROL;
 #define WEAK_MAGN_MARGIN 5      //弱磁速度超前裕度
 
 /*死区补偿功能配置*/
-#define USE_DEADTIME_COMPENSATION 0     // 死区补偿使能开关：1开启，0关闭
+#define USE_DEADTIME_COMPENSATION 1     // 死区补偿使能开关：1开启，0关闭
 #define DEADTIME_TICKS 50               // 死区时间（时钟周期数，保留兼容，实际死区由DRV8353RH内部100ns主导）
 #define PWM_CLOCK_HZ 200000000          // PWM时钟频率 200MHz
-#define DEADTIME_COMP_VOLTAGE 49        // 死区补偿电压 Q10格式 (~0.048V * 1024，按48V/100ns/10kHz估算)
+#define DEADTIME_COMP_VOLTAGE 912       // 死区补偿电压 Q10格式 (Vdc×Td/Ts + Rds_on×I_avg + V_diode ≈ 0.89V × 1024)
 #define DEADTIME_CURRENT_THRESHOLD 512  // 电流过零区阈值 Q10格式 (0.5A * 1024)
 
 /*保护功能开关*/
@@ -96,7 +96,7 @@ extern volatile uint8_t USART_CONTROL;
 #define FLASH_DATA_IS_UPDATA_FLAG 60
 #define ELEC_ANGLE_ESTIMATE_FAILED 70                          // 上一次电角度辨识失败
 #define MECH_OFFSET_ANGLE_IS_UPDATA_FLAG ((uint16_t)0x0064)    // 用户定义零点
-#define FLASH_STRUCT_VERSION 4                                 // FlashSavedData 结构体版本（PhaseOrder 取代 InvertDirflag, elec_offset 单值）
+#define FLASH_STRUCT_VERSION 5                                // FlashSavedData 结构体版本（PhaseOrder 取代 InvertDirflag, elec_offset 单值）
 
 #define LOCKED_MOTOR_CURRENT (75 * 1024)                       // 10A
 #define DE_LOCKED_CURRENT (LOCKED_MOTOR_CURRENT / 6)
@@ -130,7 +130,7 @@ extern volatile uint8_t USART_CONTROL;
 #define DEFAULT_RUN_MODE NO_MODE
 
 extern uint32_t MAX_CURRENT_PRE;
-#define DEFAULT_MAX_CURRENT (60 * 1024)    // 额定65Nm输出端, 对应电机端~22A, 留裕量60A
+#define DEFAULT_MAX_CURRENT (80 * 1024 - 1)    // 额定65Nm输出端, 对应电机端~22A, 留裕量60A
 
 // #define DEFAULT_MAX_SPEED                       (30 * 25*1024)   //30rpm
 extern uint32_t DEFAULT_MAX_SPEED;
@@ -153,13 +153,13 @@ extern uint32_t INC_PID_SPEED_KP;
 extern uint32_t INC_PID_SPEED_KI;
 extern uint32_t INC_PID_SPEED_KD;
 extern uint32_t POSERRFF_KP;
-#define INC_PID_SPEED_LIMIT (60 * 1024)    // 速度环输出限幅 60A (额定65Nm需~22A)
+#define INC_PID_SPEED_LIMIT (45 * 1024)    // 速度环输出限幅 35A (实测33A跑飞，留2A裕量)
 #define DEFAULT_PID_SPEED_DIV 65000
 
 extern uint32_t INC_PID_CURRENT_KP;
 extern uint32_t INC_PID_CURRENT_KI;
 extern uint32_t INC_PID_CURRENT_KD;
-#define INC_PID_CURRENT_LIMIT (28467)    //(27.8*1024) 28467
+#define INC_PID_CURRENT_LIMIT (27648)    //(27.8*1024) 28467
 // #define VQD_LIMIT                               (27*1024)       //48v*sqrtf(3)/2 = 41.5v
 #define DEFAULT_PID_DIV 100
 
@@ -426,7 +426,7 @@ typedef struct {
   uint16_t RunDataFlag;             // 运行数据限制 00||FF为无 其余为有 运行设定，立即生效
   uint16_t RunMode;                 // 运行模式 CIA AXIS
   int32_t MaxSpeed;                 // 单位0.1rpm
-  uint16_t MaxCurrent;              // 单位0.1A
+  uint32_t MaxCurrent;              // 单位0.1A
   uint16_t PositionLimitFlag;
   int32_t MaxPositionLimit;         // 单位0.1°
   int32_t MinPositionLimit;         // 单位0.1°

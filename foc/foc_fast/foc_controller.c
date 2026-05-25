@@ -53,8 +53,8 @@ void set_ver_par(uint8_t id) {
     INC_PID_POSITION_KP = 800;
     INC_PID_POSITION_KI = 5;
     INC_PID_POSITION_KD = 0;
-    INC_PID_SPEED_KP    = 500;
-    INC_PID_SPEED_KI    = 4;
+    INC_PID_SPEED_KP    = 1500;
+    INC_PID_SPEED_KI    = 12;
     INC_PID_SPEED_KD    = 0;
     POSERRFF_KP         = 300;
     INC_PID_CURRENT_KP  = 55;                // 保守起步
