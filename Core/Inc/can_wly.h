@@ -42,6 +42,7 @@ extern "C" {
 #define CAN_WLY_ID_SDO_REQ_BASE 0x600
 #define CAN_WLY_ID_CTRL_BASE    0x700
 #define CAN_WLY_ID_EXT_STATUS   0x7FE
+#define CAN_WLY_ID_TEST_RESULT  0x7FD  /* 电流带宽测试逐拍数据回传 */
 
 /* 控制帧尾字节 (D[7]) */
 #define CAN_WLY_CTRL_ENABLE     0xFA
@@ -71,7 +72,9 @@ extern "C" {
 #define CAN_WLY_OD_DRI_SPD_KP   0x200C
 #define CAN_WLY_OD_DRI_SPD_KI   0x200D
 #define CAN_WLY_OD_NODE_ID      0x2F00  /* 节点地址 (自定义, 参考 motor_h7) */
-#define CAN_WLY_OD_AUTO_REPORT  0x2F05  /* 主动上报模式: 0=关闭, 2=开启 */
+#define CAN_WLY_OD_AUTO_REPORT  0x2F05  /* 测试命令: 0=停 0x7FD 流, 1=启 0x7FD 流, 2=开 1ms 0x7FE 周报 */
+#define CAN_WLY_OD_TEST_FREQ    0x2F06  /* uint32, Hz, 单频注入频率 (cmd=1 启动用) */
+#define CAN_WLY_OD_TEST_AMPL    0x2F07  /* uint32, Q10 A, 单频注入幅值 (cmd=1 启动用) */
 
 /* 控制模式 (匹配 foc_controller.h 中的 CIA402 模式常量) */
 
@@ -110,6 +113,14 @@ extern can_wly_limits_t g_can_wly_lim;
 /* 扭矩常数 KT (N·m / A, q轴电流 -> 输出端扭矩, 含减速比)
  *   motor_h7: KT_OUT = Kt * GR. 这里暂以 1.0 估算, 标定后通过 SDO 修改 */
 extern float g_can_wly_kt_out;
+
+/* Kt LUT 转换 (公开给串口指令复用): 双向, 含 g_can_wly_kt_out 缩放 */
+float can_wly_iA_to_Nm(float i_A);
+float can_wly_Nm_to_iA(float t_Nm);
+
+/* 0x7FD 电流带宽测试逐拍数据流 (FOC ISR 调用) */
+int16_t can_wly_test_isr_pre(void);                                       /* 返回单频注入信号 (Q10 A), 未启动返回 0 */
+void    can_wly_test_isr_post(int32_t iq_ref_filterd, int32_t iq_fb);     /* 打包 8B 帧立即发 0x7FD */
 
 /* 减速比 (用于 rpm/rad-s 换算. 对齐 motor_h7: GR=25 对应 CLAUDE.md) */
 #define CAN_WLY_GR          25.0f

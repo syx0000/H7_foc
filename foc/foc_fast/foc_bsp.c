@@ -373,11 +373,16 @@ void dbg_cmd_set(void) {
 
         if (controller_eyou.controller_mode == PROFILE_TORQUE_MODE ||
             controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE) {
-            int32_t iq = Data;
-            if (iq > INC_PID_SPEED_LIMIT) { iq = INC_PID_SPEED_LIMIT; printf("  iq cmd clamped to +%d\r\n", INC_PID_SPEED_LIMIT); }
-            else if (iq < -INC_PID_SPEED_LIMIT) { iq = -INC_PID_SPEED_LIMIT; printf("  iq cmd clamped to -%d\r\n", INC_PID_SPEED_LIMIT); }
+            /* tar 字段语义: N·m (输出端扭矩), 经 Kt LUT 反查到 q 轴电流 Q10 */
+            char *tar_str = strstr((char *)dbgRecvBuf, "tar");
+            float tq_nm = (tar_str != NULL) ? atof(tar_str + 3) : 0.0f;
+            int32_t iq = (int32_t)(can_wly_Nm_to_iA(tq_nm) * 1024.0f);
+            int32_t max_cur = (int32_t)controller_eyou.FlashData.MaxCurrent;
+            if (iq >  max_cur) { iq =  max_cur; printf("  iq cmd clamped to +%d\r\n", max_cur); }
+            else if (iq < -max_cur) { iq = -max_cur; printf("  iq cmd clamped to -%d\r\n", max_cur); }
             controller_eyou.I_q_ref = iq;
             controller_eyou.velocity_ref = 0;
+            printf("  tar=%.3f Nm -> Iq=%ld Q10\r\n", tq_nm, (long)iq);
         } else if (controller_eyou.controller_mode == PROFILE_VELOCITY_MOCE ||
                    controller_eyou.controller_mode == CYCLIC_SYNC_VELOCITY_MODE) {
             controller_eyou.velocity_ref = Data * 1024 * 25;
@@ -648,7 +653,7 @@ void dbg_log_print(void) {
         printf("%d, %d, %d\r\n", controller_eyou.CCR2, controller_eyou.CCR3, controller_eyou.CCR4);
         break;
     case 70:
-        printf("%d, %d, %d\r\n", controller_eyou.I_a, controller_eyou.I_b, controller_eyou.I_c);
+        printf("%d, %d, %d, %d, %d, %d\r\n", controller_eyou.CCR2, controller_eyou.CCR3, controller_eyou.CCR4, controller_eyou.I_a, controller_eyou.I_b, controller_eyou.I_c);
         break;
     case 90:
         printf("%d, %d, %d\r\n", controller_eyou.Ia_raw, controller_eyou.Ib_raw, controller_eyou.Ic_raw);
@@ -912,6 +917,139 @@ void dbg_log_print(void) {
         }
         dbgLogFlag = 0;
         break;
+    case 200: {
+        /* 扭矩诊断综合快照: 速度环 + 电流环 + 电压裕量 + BEMF + 限幅状态
+         * 6 行块, 每行 [L200/n] 前缀便于 awk/grep 拆分.
+         * 内部节流 50ms (20Hz), 不受 logfreq 影响 — 6 行 ~600B, 高速会撑爆 921600.
+         *   行1 [L200/1]: 模式 / 故障 / 速度链 (load端 rpm)
+         *   行2 [L200/2]: 速度PID 状态 (Iq_ref 来源)
+         *   行3 [L200/3]: 电流PID + Vdq + Vs/Udc 调制度 + BEMF 估算
+         *   行4 [L200/4]: 三相反馈 + αβ + 原始 ADC + theta_e
+         *   行5 [L200/5]: PWM CCR 占空比 + 双环斜坡状态
+         *   行6 [L200/6]: 外层限幅 + 输出端反馈 + 位置环饱和
+         * 单位:
+         *   spd_ref/spd_filt: load端 rpm (除以 25 后已是输出端 rpm)
+         *   spd_mech: 电机端 rpm
+         *   I_*: 0.01A (Q10 / 10.24 后保留两位)
+         *   V_*: 0.01V (同上)
+         */
+        static uint32_t t200 = 0;
+        uint32_t now200 = HAL_GetTick();
+        if (now200 - t200 < 50) break;
+        t200 = now200;
+
+        ControllerStruct *c = &controller_eyou;
+
+        /* 速度: 内部 velocity_ref 单位 = rpm × 1024 × 25 (load端), dtheta_mech 单位 = rpm × 1024 (电机端) */
+        int32_t spd_ref_load_x100   = c->velocity_ref         / (25 * 1024 / 100);  /* 0.01 rpm load端 */
+        int32_t spd_filt_load_x100  = c->velocity_ref_filterd / (25 * 1024 / 100);
+        int32_t spd_mech_motor_x100 = c->dtheta_mech          / (1024 / 100);       /* 0.01 rpm 电机端 */
+        int32_t spd_err_motor_x100  = (c->velocity_ref_filterd / 25 - c->dtheta_mech) / (1024 / 100);
+
+        /* PID 饱和判定: |OutPut| 距离 OutputMax 不到 1 LSB 视为撞限 */
+        int32_t spd_out      = c->IncPID_Speed.OutPut;
+        int32_t spd_out_max  = c->IncPID_Speed.OutputMax;
+        int sat_spd          = (spd_out >=  spd_out_max - 1) ? 1
+                             : (spd_out <= -spd_out_max + 1) ? -1 : 0;
+
+        int32_t iq_pid       = c->IncPID_QAxis.OutPut;        /* PI 自身输出 (BEMF FF 之前) */
+        int32_t iq_pid_max   = c->IncPID_QAxis.OutputMax;
+        int sat_iq           = (iq_pid >=  iq_pid_max - 1) ? 1
+                             : (iq_pid <= -iq_pid_max + 1) ? -1 : 0;
+
+        int32_t id_pid       = c->IncPID_DAxis.OutPut;
+        int32_t id_pid_max   = c->IncPID_DAxis.OutputMax;
+        int sat_id           = (id_pid >=  id_pid_max - 1) ? 1
+                             : (id_pid <= -id_pid_max + 1) ? -1 : 0;
+
+        /* Vs 矢量幅值 (Q10 V) -> 0.01V; INC_PID_CURRENT_LIMIT = 28467 ≈ 27.8V Q10 */
+        int32_t vs_q10       = (int32_t)sqrtf((float)c->V_d * c->V_d + (float)c->V_q * c->V_q);
+        int sat_vs           = (vs_q10 >= INC_PID_CURRENT_LIMIT - 16) ? 1 : 0;
+
+        /* 调制度 = Vs / (Udc/sqrt(3))(SVPWM 线性区上限). Udc 0.1V → V; */
+        float udc_v          = (float)motorProValue.Udc * 0.1f;
+        float vs_v           = (float)vs_q10 / 1024.0f;
+        int   mod_pct        = (udc_v > 1.0f)
+                             ? (int)(vs_v * 1.732f / udc_v * 100.0f) : 0;
+
+        /* BEMF 估算 (即使 USE_BEMF_FF=0 也算出来给参考)
+         *  ωe [rad/s] = dtheta_mech [rpm×1024] × bemf_omega_e_k (= NPP·2π/(1024·60))
+         *  Vd_ff = -ωe × Lq × Iq
+         *  Vq_ff = ωe × (Ld × Id + ψf)
+         */
+        float omega_e        = (float)c->dtheta_mech * c->bemf_omega_e_k;
+        float vd_bemf_v      = -omega_e * c->ident_test.Lq * ((float)c->I_q / 1024.0f);
+        float vq_bemf_v      = omega_e * (c->ident_test.Ld * ((float)c->I_d / 1024.0f)
+                                         + c->ident_test.flux_psi);
+
+        /* 输出 */
+        printf("[L200/1] mode=%d run=%d err=0x%08lX | sref=%ld sflt=%ld smech=%ld serr=%ld (0.01rpm) | Imax=%u(Q10)\r\n",
+               c->controller_mode, c->foc_run,
+               (unsigned long)c->ServoErrFlag.All_Flag,
+               (long)spd_ref_load_x100, (long)spd_filt_load_x100,
+               (long)spd_mech_motor_x100, (long)spd_err_motor_x100,
+               (unsigned)c->FlashData.MaxCurrent);
+
+        printf("[L200/2] SpdPID Kp=%u Ki=%u Div=%u | aim=%ld now=%ld err=%ld out=%ld/%ld sat=%d -> Iq_ref=%ld(Q10)\r\n",
+               (unsigned)c->IncPID_Speed.P, (unsigned)c->IncPID_Speed.I,
+               (unsigned)c->IncPID_Speed.PID_Div,
+               (long)c->IncPID_Speed.AimValue, (long)c->IncPID_Speed.NowValue,
+               (long)c->IncPID_Speed.iError,
+               (long)spd_out, (long)spd_out_max, sat_spd,
+               (long)c->I_q_ref);
+
+        printf("[L200/3] CurPID Kp=%u Ki=%u Div=%u | Iqref_f=%ld Iq=%ld Iqerr=%ld Id=%ld Idref=%ld | Vq=%ld Vd=%ld Vs=%ld(Q10) Vlim=%d sat:Iq=%d Id=%d Vs=%d | Udc=%.1fV mod=%d%% | BEMF_ff=%d Vd_ff=%.2fV Vq_ff=%.2fV psi=%.4f Lq=%.2fmH\r\n",
+               (unsigned)c->IncPID_QAxis.P, (unsigned)c->IncPID_QAxis.I,
+               (unsigned)c->IncPID_QAxis.PID_Div,
+               (long)c->I_q_ref_filterd, (long)c->I_q,
+               (long)(c->I_q_ref_filterd - c->I_q),
+               (long)c->I_d, (long)c->I_d_ref,
+               (long)c->V_q, (long)c->V_d, (long)vs_q10,
+               INC_PID_CURRENT_LIMIT,
+               sat_iq, sat_id, sat_vs,
+               udc_v, mod_pct,
+               USE_BEMF_FF, vd_bemf_v, vq_bemf_v,
+               c->ident_test.flux_psi, c->ident_test.Lq * 1000.0f);
+
+        /* 行4: 三相电流反馈 (Q10, raw ADC, 校准 offset) + αβ 分量 */
+        printf("[L200/4] Ia=%ld Ib=%ld Ic=%ld(Q10) | Ialpha=%ld Ibeta=%ld | raw a=%lu b=%lu | offA=%u offB=%u | theta_e=%ld order=%u\r\n",
+               (long)c->I_a, (long)c->I_b, (long)c->I_c,
+               (long)c->I_alpha, (long)c->I_beta,
+               (unsigned long)c->Ia_raw, (unsigned long)c->Ib_raw,
+               (unsigned)c->FlashData.Ia_offset, (unsigned)c->FlashData.Ib_offset,
+               (long)c->theta_elec, (unsigned)c->FlashData.PhaseOrder);
+
+        /* 行5: PWM CCR + 双环斜坡 (区分饱和原因)
+         *   ccr 接近 PWM_T 或 0 => SVPWM 撞调制极限
+         *   spd_ramp != velocity_ref => SpeedLoopSmooth 在限速 (MIN_ACC_TIME 在拖)
+         *   cur_ramp != I_q_ref     => CurrentLoopSmooth 在限速 (CURRENT_LOOP_MIN_ACC_TIME 在拖)
+         */
+        int dc2 = (PWM_T > 0) ? (int)((int64_t)c->CCR2 * 1000 / PWM_T) : 0;  /* 0.1% */
+        int dc3 = (PWM_T > 0) ? (int)((int64_t)c->CCR3 * 1000 / PWM_T) : 0;
+        int dc4 = (PWM_T > 0) ? (int)((int64_t)c->CCR4 * 1000 / PWM_T) : 0;
+        printf("[L200/5] CCR=%lu/%lu/%lu (%d.%d/%d.%d/%d.%d%%) PWM_T=%d | SpdRamp now=%ld step=%ld vref=%ld | CurRamp now=%ld step=%ld iqref=%ld\r\n",
+               (unsigned long)c->CCR2, (unsigned long)c->CCR3, (unsigned long)c->CCR4,
+               dc2/10, dc2%10, dc3/10, dc3%10, dc4/10, dc4%10, PWM_T,
+               (long)c->SpeedSmooth.NowVelocityRef, (long)c->SpeedSmooth.MaxVelAccEveryPrd,
+               (long)c->velocity_ref,
+               (long)c->CurrentSmooth.NowCurrentRef, (long)c->CurrentSmooth.MaxCurAccEveryPrd,
+               (long)c->I_q_ref);
+
+        /* 行6: 外层限幅 + 输出端反馈 (位置模式必看)
+         *   MaxSpeed 太小会把 velocity_ref 夹下来 -> Iq_ref 永远到不了顶
+         *   位置环饱和 (PosOut == PosLimit) 时扭矩堵在 INC_PID_POSITION_LIMIT
+         */
+        int32_t pos_out      = c->IncPID_Position.OutPut;
+        int32_t pos_out_max  = c->IncPID_Position.OutputMax;
+        int sat_pos          = (pos_out >=  pos_out_max - 1) ? 1
+                             : (pos_out <= -pos_out_max + 1) ? -1 : 0;
+        printf("[L200/6] MaxSpd=%ld(load Q10) OverI=%u(Q10) OverUdc=%u(0.1V) | PosRef=%ld PosOut=%ld dPosOut=%ld(Q10rpm) | PosPID out=%ld/%ld sat=%d\r\n",
+               (long)c->FlashData.MaxSpeed,
+               (unsigned)Threshold.OverCurrent, (unsigned)Threshold.OverUdc,
+               (long)c->position_ref, (long)c->real_position_out, (long)c->dtheta_mech_out,
+               (long)pos_out, (long)pos_out_max, sat_pos);
+        break;
+    }
     default:
         break;
     }

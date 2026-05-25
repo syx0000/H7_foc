@@ -30,6 +30,14 @@ float g_can_wly_kt_out = 1.0f;
 /* 主动上报模式 (0x2F05 写 2 开启). 1ms 周期上报 0x100+ID 状态帧 */
 static uint8_t s_auto_report = 0;
 
+/* 0x2F05 cmd=1 触发的电流带宽测试: 单频正弦注入 + 0x7FD 逐拍上报 */
+static volatile uint8_t  s_test_active     = 0;          /* 1 = 注入 + 上报中 */
+static uint32_t          s_test_freq_hz    = 100;        /* 0x2F06 默认 100 Hz */
+static uint32_t          s_test_ampl_q10   = 256;        /* 0x2F07 默认 0.25 A (Q10) */
+static volatile uint32_t s_test_phase_acc  = 0;
+static uint32_t          s_test_phase_step = 0;          /* freq/fs * 2^32, 启动时算好 */
+static uint32_t          s_test_tx_fail_cnt = 0;         /* 0x7FD FIFO 满丢帧计数 */
+
 /* 发送失败计数器 (调试用) */
 static uint32_t s_tx_fail_count = 0;
 
@@ -101,14 +109,77 @@ static int32_t vel_rad_s_to_int(float rad_s) {
     float rpm_out = rad_s / RPM_TO_RAD_S;
     return (int32_t)(rpm_out * 1024.0f * CAN_WLY_GR);
 }
+/* ========== Kt 标定 LUT (电机端 Iq A <-> 输出端 Torque N·m) ==========
+ * 单调递增, 仅存正半轴, 负值靠 sign 对称
+ * 端点之外按相邻段斜率线性外推
+ * 反查依赖 t_Nm 单调, 若饱和翻折需把表截到翻折点之前
+ * g_can_wly_kt_out 作为整体缩放因子, 用于不同电机批次 ±x% 微调, 默认 1.0f
+ * 数据来源: TODO 测功机/拉力计静态标定后替换 (当前是占位线性) */
+typedef struct { float i_A; float t_Nm; } kt_pt_t;
+
+static const kt_pt_t s_kt_lut[] = {
+    {  0.0f,  0.00f},
+    {  5.0f,  0.50f},
+    { 10.0f,  1.00f},
+    { 15.0f,  1.50f},
+    { 20.0f,  1.95f},
+    { 30.0f,  2.80f},
+    { 40.0f,  3.55f},
+    { 50.0f,  4.20f},
+    { 60.0f,  4.75f},
+    { 80.0f,  5.50f},
+};
+#define KT_LUT_N (sizeof(s_kt_lut) / sizeof(s_kt_lut[0]))
+
+/* I (A, 带符号) -> T (N·m, 带符号) */
+float can_wly_iA_to_Nm(float i_A) {
+    float s = (i_A < 0.0f) ? -1.0f : 1.0f;
+    float a = (i_A < 0.0f) ? -i_A : i_A;
+    float t;
+    if (a <= s_kt_lut[0].i_A) {
+        t = s_kt_lut[0].t_Nm;
+    } else {
+        uint32_t i;
+        for (i = 1; i < KT_LUT_N; i++) {
+            if (a <= s_kt_lut[i].i_A) break;
+        }
+        if (i >= KT_LUT_N) i = KT_LUT_N - 1;
+        float di = s_kt_lut[i].i_A - s_kt_lut[i - 1].i_A;
+        float k  = (di > 0.0f) ? (s_kt_lut[i].t_Nm - s_kt_lut[i - 1].t_Nm) / di : 0.0f;
+        t = s_kt_lut[i - 1].t_Nm + k * (a - s_kt_lut[i - 1].i_A);
+    }
+    return s * t * g_can_wly_kt_out;
+}
+
+/* T (N·m, 带符号) -> I (A, 带符号), LUT t 单调递增 */
+float can_wly_Nm_to_iA(float t_Nm) {
+    if (g_can_wly_kt_out == 0.0f) return 0.0f;
+    float t_scaled = t_Nm / g_can_wly_kt_out;
+    float s = (t_scaled < 0.0f) ? -1.0f : 1.0f;
+    float t = (t_scaled < 0.0f) ? -t_scaled : t_scaled;
+    float a;
+    if (t <= s_kt_lut[0].t_Nm) {
+        a = s_kt_lut[0].i_A;
+    } else {
+        uint32_t i;
+        for (i = 1; i < KT_LUT_N; i++) {
+            if (t <= s_kt_lut[i].t_Nm) break;
+        }
+        if (i >= KT_LUT_N) i = KT_LUT_N - 1;
+        float dt = s_kt_lut[i].t_Nm - s_kt_lut[i - 1].t_Nm;
+        float k  = (dt > 0.0f) ? (s_kt_lut[i].i_A - s_kt_lut[i - 1].i_A) / dt : 0.0f;
+        a = s_kt_lut[i - 1].i_A + k * (t - s_kt_lut[i - 1].t_Nm);
+    }
+    return s * a;
+}
+
 /* 转矩: q轴电流(Q10) -> N·m */
 static float tq_iq_to_nm(int32_t iq_q10) {
-    return ((float)iq_q10 / 1024.0f) * g_can_wly_kt_out;
+    return can_wly_iA_to_Nm((float)iq_q10 / 1024.0f);
 }
 /* 转矩: N·m -> q轴电流(Q10) */
 static int32_t tq_nm_to_iq(float nm) {
-    if (g_can_wly_kt_out == 0.0f) return 0;
-    return (int32_t)(nm / g_can_wly_kt_out * 1024.0f);
+    return (int32_t)(can_wly_Nm_to_iA(nm) * 1024.0f);
 }
 
 /* ========== 0x100+ID 状态帧 (12 字节) ==========
@@ -248,8 +319,9 @@ static void handle_torque_cmd(const uint8_t *data, uint32_t len) {
     uint16_t t_raw = (uint16_t)data[off] | ((uint16_t)data[off + 1] << 8);
     float t_nm = uint_to_float(t_raw, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
     int32_t iq = tq_nm_to_iq(t_nm);
-    if (iq > INC_PID_SPEED_LIMIT) iq = INC_PID_SPEED_LIMIT;
-    else if (iq < -INC_PID_SPEED_LIMIT) iq = -INC_PID_SPEED_LIMIT;
+    int32_t max_cur = (int32_t)controller_eyou.FlashData.MaxCurrent;
+    if (iq >  max_cur) iq =  max_cur;
+    else if (iq < -max_cur) iq = -max_cur;
     controller_eyou.I_q_ref = iq;
     controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
     send_status_frame();
@@ -297,7 +369,7 @@ static void handle_mit_cmd(const uint8_t *data, uint32_t len) {
 
     controller_eyou.mit_p_des = uint_to_float(p_raw, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
     controller_eyou.mit_v_des = uint_to_float(v_raw, g_can_wly_lim.spd_min, g_can_wly_lim.spd_max, 16);
-    controller_eyou.mit_t_ff  = uint_to_float(t_raw, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16) / g_can_wly_kt_out;
+    controller_eyou.mit_t_ff  = can_wly_Nm_to_iA(uint_to_float(t_raw, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16));
     controller_eyou.mit_kp    = uint_to_float(kp_raw, g_can_wly_lim.kp_min, g_can_wly_lim.kp_max, 16);
     controller_eyou.mit_kd    = uint_to_float(kd_raw, g_can_wly_lim.kd_min, g_can_wly_lim.kd_max, 16);
 
@@ -352,6 +424,14 @@ static uint8_t sdo_read_value(uint16_t idx, uint8_t subidx, uint8_t out[4]) {
     }
     case CAN_WLY_OD_NODE_ID: out[0] = s_node_id; return 1;
     case CAN_WLY_OD_AUTO_REPORT: out[0] = s_auto_report ? 2 : 0; return 1;
+    case CAN_WLY_OD_TEST_FREQ: {
+        uint32_t v = s_test_freq_hz;
+        out[0] = v; out[1] = v >> 8; out[2] = v >> 16; out[3] = v >> 24; return 1;
+    }
+    case CAN_WLY_OD_TEST_AMPL: {
+        uint32_t v = s_test_ampl_q10;
+        out[0] = v; out[1] = v >> 8; out[2] = v >> 16; out[3] = v >> 24; return 1;
+    }
     default: return 0;
     }
 }
@@ -396,8 +476,36 @@ static uint8_t sdo_write_value(uint16_t idx, uint8_t subidx, const uint8_t *in) 
         return 0;
     }
     case CAN_WLY_OD_AUTO_REPORT: {
-        /* 0x2F05: 主动上报模式 (0=关闭, 2=开启 1ms 周期上报) */
-        s_auto_report = (in[0] == 2) ? 1 : 0;
+        /* 0x2F05 测试命令: 0=停 0x7FD 流, 1=启 0x7FD 流 (单频注入), 2=开 1ms 0x7FE 周报
+         * 三条命令独立, 互不影响对方状态 */
+        uint8_t cmd = in[0];
+        if (cmd == 0) {
+            s_test_active = 0;
+        } else if (cmd == 1) {
+            /* 启动单频注入: phase_step = freq / FOC_FREQUENCY * 2^32
+             * FOC_FREQUENCY = 10000Hz, 直接用 (uint64) 算, 防 32 位溢出 */
+            uint64_t step = ((uint64_t)s_test_freq_hz << 32) / 10000ULL;
+            s_test_phase_step = (uint32_t)step;
+            s_test_phase_acc = 0;
+            s_test_active = 1;
+        } else if (cmd == 2) {
+            s_auto_report = 1;
+        }
+        return 1;
+    }
+    case CAN_WLY_OD_TEST_FREQ: {
+        uint32_t v = (uint32_t)in[0] | ((uint32_t)in[1] << 8) |
+                     ((uint32_t)in[2] << 16) | ((uint32_t)in[3] << 24);
+        if (v == 0) v = 1;                  /* 防 0 频率 */
+        if (v > 5000) v = 5000;             /* 限 < Nyquist (FOC=10kHz, Nyquist=5kHz) */
+        s_test_freq_hz = v;
+        return 1;
+    }
+    case CAN_WLY_OD_TEST_AMPL: {
+        uint32_t v = (uint32_t)in[0] | ((uint32_t)in[1] << 8) |
+                     ((uint32_t)in[2] << 16) | ((uint32_t)in[3] << 24);
+        if (v > 30 * 1024U) v = 30 * 1024U; /* 限 30A 防过流 */
+        s_test_ampl_q10 = v;
         return 1;
     }
     case CAN_WLY_OD_SYNC_CYCLE:
@@ -606,5 +714,46 @@ void can_wly_tick_1ms(void) {
         if (--s_can_timeout_cnt == 0) {
             controller_eyou.ServoErrFlag.Bit.CommunicateErr = 1;
         }
+    }
+}
+
+/* ========== 0x7FD 电流带宽测试逐拍数据流 (FOC ISR 直接调用) ==========
+ * cmd=1 启动后:
+ *   - pre()  在 PID 之前累加相位, 返回 ampl*sin(phase) 的 Q10 注入信号给 I_q_ref_filterd
+ *   - post() 在 set_phase_voltage 之后, 打包 (Iq_ref_filterd, I_q) 立即发 0x7FD
+ * 不活跃时 pre 返回 0, post 直返
+ * 协议格式: byte[0..3] = (int32)(I_q_ref_filterd_A * 1000) + 50000   LSB first
+ *           byte[4..7] = (int32)(I_q_A             * 1000) + 50000   LSB first
+ * 量程 ±50A (uint32 装下偏置后值, 超界绕环失真 — 0x2F07 已限 30A) */
+
+#include "foc_kernel.h"  /* get_sincos_value */
+
+int16_t can_wly_test_isr_pre(void) {
+    if (!s_test_active) return 0;
+    uint16_t angle = (uint16_t)(s_test_phase_acc >> 16);
+    Trig_Components sc = get_sincos_value((int32_t)angle);
+    /* sc.hSin Q15, ampl Q10 -> ((Q10 * Q15) >> 15) = Q10 */
+    int32_t inj = ((int32_t)s_test_ampl_q10 * sc.hSin) >> 15;
+    s_test_phase_acc += s_test_phase_step;
+    if (inj >  32767) inj =  32767;
+    if (inj < -32768) inj = -32768;
+    return (int16_t)inj;
+}
+
+void can_wly_test_isr_post(int32_t iq_ref_filterd, int32_t iq_fb) {
+    if (!s_test_active) return;
+    /* I (Q10) -> A * 1000 = Q10 * 1000 / 1024
+     * 整数化: (iq_q10 * 125) / 128, 误差 < 0.025% (1000/1024 ≈ 0.9766, 125/128=0.9766) */
+    int32_t ref_x1000 = (iq_ref_filterd * 125) / 128;
+    int32_t fb_x1000  = (iq_fb          * 125) / 128;
+    uint32_t ref_u = (uint32_t)(ref_x1000 + 50000);
+    uint32_t fb_u  = (uint32_t)(fb_x1000  + 50000);
+    uint8_t d[8];
+    d[0] = (uint8_t)(ref_u);       d[1] = (uint8_t)(ref_u >> 8);
+    d[2] = (uint8_t)(ref_u >> 16); d[3] = (uint8_t)(ref_u >> 24);
+    d[4] = (uint8_t)(fb_u);        d[5] = (uint8_t)(fb_u >> 8);
+    d[6] = (uint8_t)(fb_u >> 16);  d[7] = (uint8_t)(fb_u >> 24);
+    if (fdcan_send(CAN_WLY_ID_TEST_RESULT, d, 8) != HAL_OK) {
+        s_test_tx_fail_cnt++;
     }
 }

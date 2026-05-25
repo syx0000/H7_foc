@@ -8,6 +8,7 @@
 
 #include "foc_current_loop.h"
 #include "foc_api.h"
+#include "can_wly.h"
 extern Portection_Value Threshold;
 extern ControllerStruct controller_eyou;
 /*******************************************************************************
@@ -70,12 +71,14 @@ void foc_current_close_loop(ControllerStruct* controller) {
 
   // 带宽测试信号注入
   int16_t sweep_signal = bw_test_run(&controller->bw_test, controller->I_q);
+  /* CAN 0x2F05 cmd=1 触发的单频注入 (协议带宽测试), 与 sweep_signal 互斥使用一般不会同时开 */
+  int16_t can_test_inject = can_wly_test_isr_pre();
 
   // 基础电流指令先经过斜坡滤波，扫频信号后叠加，避免被滤波器吃掉
 #if USE_CURRENT_LOOP_FILTER
-  controller->I_q_ref_filterd = CurrentLoopSmoothRun(controller->I_q_ref, &controller->CurrentSmooth) + sweep_signal;
+  controller->I_q_ref_filterd = CurrentLoopSmoothRun(controller->I_q_ref, &controller->CurrentSmooth) + sweep_signal + can_test_inject;
 #else
-  controller->I_q_ref_filterd = controller->I_q_ref + sweep_signal;
+  controller->I_q_ref_filterd = controller->I_q_ref + sweep_signal + can_test_inject;
 #endif
 
   /****************************辨识参数时，关闭该段，避免影响****************************************/
@@ -106,9 +109,11 @@ void foc_current_close_loop(ControllerStruct* controller) {
     if (controller->ident_test.flux_psi > 0.0f &&
         controller->ident_test.Lq > 0.0f) {
       float omega_e = (float)controller->dtheta_mech * controller->bemf_omega_e_k;
-      float Vd_ff = -omega_e * controller->ident_test.Lq * (float)controller->I_q;
-      float Vq_ff =  omega_e * (controller->ident_test.Ld * (float)controller->I_d
-                                + controller->ident_test.flux_psi * 1024.0f);
+      // 注意：I_q和I_d是Q10格式，需要除以1024转换为实际电流（A）
+      // 前馈电压也需要转换为Q10格式（×1024）
+      float Vd_ff = -omega_e * controller->ident_test.Lq * ((float)controller->I_q / 1024.0f) * 1024.0f;
+      float Vq_ff =  omega_e * (controller->ident_test.Ld * ((float)controller->I_d / 1024.0f)
+                                + controller->ident_test.flux_psi) * 1024.0f;
       controller->V_d += (int32_t)Vd_ff;
       controller->V_q += (int32_t)Vq_ff;
     }
@@ -118,15 +123,15 @@ void foc_current_close_loop(ControllerStruct* controller) {
   check_phases_overcurrent_timesliced(controller);
 
   #if USE_DEADTIME_COMPENSATION
-    // 死区补偿（三相电流方向补偿）
-    deadtime_compensation(controller);//_3phase
+    // 死区补偿（三相电流方向补偿，精度优于dq轴方式）
+    deadtime_compensation_3phase(controller);
     #endif
 
   /* 超速保护: 实际速度 > 2550rpm 电机端时, 按比例削减电压输出
    * 2550~2650rpm: 线性从 100% 削到 0%
    * >2650rpm: 输出归零
    * scale 经一阶低通滤波, 避免阈值附近电压跳变产生噪音 */
-#if 0  /* 关闭: 调试扭矩跑不到额定时排除超速降压干扰 */
+#if 0
   #define OVERSPD_LOW   (2600 * 1024)
   #define OVERSPD_HIGH  (2700 * 1024)
   {
@@ -153,9 +158,19 @@ void foc_current_close_loop(ControllerStruct* controller) {
 #endif
 
   //
+  int32_t Vd_before = controller->V_d;
+  int32_t Vq_before = controller->V_q;
   limit_norm(&controller->V_d, &controller->V_q, INC_PID_CURRENT_LIMIT);    //
 
+  // anti-windup: 检测电压是否被截断，回写饱和标志给 PID
+  uint8_t vs_saturated = (controller->V_d != Vd_before || controller->V_q != Vq_before) ? 1 : 0;
+  controller->IncPID_QAxis.saturated = vs_saturated;
+  controller->IncPID_DAxis.saturated = vs_saturated;
+
   set_phase_voltage(controller, controller->V_d, controller->V_q, controller->theta_elec);
+
+  /* CAN 0x2F05 cmd=1 触发的逐拍数据回传 (0x7FD), 上传 (Iq_ref_filterd, I_q) */
+  can_wly_test_isr_post(controller->I_q_ref_filterd, controller->I_q);
   /********************************************************************/
 }
 
@@ -329,6 +344,11 @@ uint8_t phase_current_sample(ControllerStruct* controller) {
     controller->I_b = (int32_t)(-controller->I_a - controller->I_c);
   }
 
+  // 三相过流保护数据源 (简单一阶低通滤波, α=0.1)
+  controller->I_a_Filter += (controller->I_a - controller->I_a_Filter) / 10;
+  controller->I_b_Filter += (controller->I_b - controller->I_b_Filter) / 10;
+  controller->I_c_Filter += (controller->I_c - controller->I_c_Filter) / 10;
+
   return 0;
 }
 
@@ -386,7 +406,7 @@ int32_t ShowFilterGoing(ControllerStruct* controller, str_FILTER1* ShowFilter) {
     :
 ********************************************************************************/
 void CurrentLoopSmoothInit(CurrentLoopSmooth* CurrentSmooth) {
-  CurrentSmooth->MaxCurAccEveryPrd = INC_PID_SPEED_LIMIT / (CURRENT_LOOP_MIN_ACC_TIME * 4);
+  CurrentSmooth->MaxCurAccEveryPrd = INC_PID_SPEED_LIMIT / (CURRENT_LOOP_MIN_ACC_TIME * 10);
   CurrentSmooth->NowCurrentRef     = 0;
   CurrentSmooth->OldCurrentRef     = 0;
   return;
