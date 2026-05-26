@@ -62,7 +62,7 @@ void foc_current_close_loop(ControllerStruct* controller) {
       ident->done = 1;
     }
 
-    limit_norm(&controller->V_d, &controller->V_q, INC_PID_CURRENT_LIMIT);
+    limit_norm(&controller->V_d, &controller->V_q, g_vs_limit);
     set_phase_voltage(controller, controller->V_d, controller->V_q, controller->theta_elec);
     return;
   }
@@ -82,6 +82,34 @@ void foc_current_close_loop(ControllerStruct* controller) {
 #endif
 
   /****************************辨识参数时，关闭该段，避免影响****************************************/
+
+  /* BEMF 前馈用电角速度: 对 dtheta_mech 一阶 LPF (~200Hz @10kHz, α=1/8)
+   * 抑制编码器差分量化噪声直接灌进 V_q (高速 ωe·ψ_f 项放大 1% 噪声 → 数百 mV 抖动) */
+#if USE_BEMF_FF
+  static float omega_e_filt = 0.0f;
+  if (controller->ident_test.flux_psi > 0.0f) {
+    float omega_e_raw = (float)controller->dtheta_mech * controller->bemf_omega_e_k;
+    omega_e_filt += (omega_e_raw - omega_e_filt) * 0.125f;
+  } else {
+    omega_e_filt = 0.0f;
+  }
+
+  /* 动态 PI OutputMax: 矢量预算 = g_vs_limit - |Vff| - 死区预留
+   * 用指令侧电流 (I_q_ref_filterd / I_d_ref) 预测当拍 Vff 模长, 含 ωe·Ld·Id 项 */
+  if (controller->ident_test.flux_psi > 0.0f) {
+    float iq_a = (float)controller->I_q_ref_filterd * (1.0f / 1024.0f);
+    float id_a = (float)controller->I_d_ref         * (1.0f / 1024.0f);
+    float Vq_ff_pred =  omega_e_filt * (controller->ident_test.Ld * id_a + controller->ident_test.flux_psi);
+    float Vd_ff_pred = -omega_e_filt *  controller->ident_test.Lq * iq_a;
+    float bemf_mag_q10 = sqrtf(Vd_ff_pred * Vd_ff_pred + Vq_ff_pred * Vq_ff_pred) * 1024.0f;
+    int32_t pi_lim = (int32_t)g_vs_limit - (int32_t)bemf_mag_q10 - 1024;
+    if (pi_lim < 4096)  pi_lim = 4096;
+    if (pi_lim > 20480) pi_lim = 20480;
+    controller->IncPID_QAxis.OutputMax = pi_lim;
+    controller->IncPID_DAxis.OutputMax = pi_lim;
+  }
+#endif
+
   // PID-Id
   controller->IncPID_DAxis.NowValue = controller->I_d;
 
@@ -108,12 +136,21 @@ void foc_current_close_loop(ControllerStruct* controller) {
   #if USE_BEMF_FF
     if (controller->ident_test.flux_psi > 0.0f &&
         controller->ident_test.Lq > 0.0f) {
-      float omega_e = (float)controller->dtheta_mech * controller->bemf_omega_e_k;
-      // 注意：I_q和I_d是Q10格式，需要除以1024转换为实际电流（A）
-      // 前馈电压也需要转换为Q10格式（×1024）
-      float Vd_ff = -omega_e * controller->ident_test.Lq * ((float)controller->I_q / 1024.0f) * 1024.0f;
-      float Vq_ff =  omega_e * (controller->ident_test.Ld * ((float)controller->I_d / 1024.0f)
-                                + controller->ident_test.flux_psi) * 1024.0f;
+      /* 解耦项用指令侧电流, 避免反馈 PWM 纹波/ADC 噪声经 ωe·L 放大灌进 V_dq.
+       * Vff 用滤波后的 omega_e_filt, 跟动态 pi_lim 共用同一份, 保证两边模型一致 */
+      float Vd_ff = -omega_e_filt * controller->ident_test.Lq * (float)controller->I_q_ref_filterd;
+      float Vq_ff =  omega_e_filt * (controller->ident_test.Ld * (float)controller->I_d_ref
+                                     + controller->ident_test.flux_psi * 1024.0f);
+
+      /* 软限幅: |Vff| ≤ 0.85·g_vs_limit, 不让前馈一项就吃光全部余量
+       * 高速突发 ωe 抖动时给 PI 留至少 15% 矢量预算, 避免 limit_norm 切相位 */
+      float ff_mag = sqrtf(Vd_ff * Vd_ff + Vq_ff * Vq_ff);
+      float ff_max = (float)g_vs_limit * 0.85f;
+      if (ff_mag > ff_max && ff_mag > 1.0f) {
+        float k = ff_max / ff_mag;
+        Vd_ff *= k;  Vq_ff *= k;
+      }
+
       controller->V_d += (int32_t)Vd_ff;
       controller->V_q += (int32_t)Vq_ff;
     }
@@ -127,13 +164,14 @@ void foc_current_close_loop(ControllerStruct* controller) {
     deadtime_compensation_3phase(controller);
     #endif
 
-  /* 超速保护: 实际速度 > 2550rpm 电机端时, 按比例削减电压输出
-   * 2550~2650rpm: 线性从 100% 削到 0%
-   * >2650rpm: 输出归零
-   * scale 经一阶低通滤波, 避免阈值附近电压跳变产生噪音 */
-#if 0
-  #define OVERSPD_LOW   (2600 * 1024)
-  #define OVERSPD_HIGH  (2700 * 1024)
+  /* 超速保护: 实际速度 > OVERSPD_LOW 电机端时, 按比例削减电压输出
+   * OVERSPD_LOW~HIGH: 线性从 100% 削到 0%
+   * >HIGH: 输出归零
+   * scale 经一阶低通滤波, 避免阈值附近电压跳变产生噪音
+   * 阈值对齐 DEFAULT_MAX_SPEED=110rpm 输出端=2750rpm 电机端, 留 100rpm 裕量 */
+#if 1
+  #define OVERSPD_LOW   (2800 * 1024)
+  #define OVERSPD_HIGH  (2950 * 1024)
   {
     static int32_t scale_filt = 1024;
     int32_t spd_abs = controller->dtheta_mech;
@@ -160,7 +198,7 @@ void foc_current_close_loop(ControllerStruct* controller) {
   //
   int32_t Vd_before = controller->V_d;
   int32_t Vq_before = controller->V_q;
-  limit_norm(&controller->V_d, &controller->V_q, INC_PID_CURRENT_LIMIT);    //
+  limit_norm(&controller->V_d, &controller->V_q, g_vs_limit);
 
   // anti-windup: 检测电压是否被截断，回写饱和标志给 PID
   uint8_t vs_saturated = (controller->V_d != Vd_before || controller->V_q != Vq_before) ? 1 : 0;
@@ -216,15 +254,61 @@ void deadtime_compensation(ControllerStruct* controller) {
 #endif
 }
 
+#if USE_DEADTIME_COMPENSATION
+/*******************************************************************************
+  死区补偿查表 (纯理论默认值, 标定后用 bwtest10 输出替换)
+  物理模型: V_dt(I) = V_base + Rds_on × |I|
+    V_base = Vdc × Td/Ts + V_F × Td/Ts
+           = 48V × 500ns/50µs + 0.7V × 500ns/50µs = 0.487V
+    Rds_on ≈ 5 mΩ (典型 60V MOSFET)
+    小电流 (<1A): 体二极管 V_F 亚阈值非线性, V_dt 比 V_base 小
+    LUT 只存正半轴, 负值 sign 对称; 端点外按相邻段斜率线性外推
+********************************************************************************/
+typedef struct { int32_t i_q10; int32_t v_q10; } dt_pt_t;
+static const dt_pt_t s_dt_lut[] = {
+    {     0,    0 },   /* 0A:    0V (过零) */
+    {   256,  205 },   /* 0.25A: 0.20V (二极管亚阈值) */
+    {   512,  307 },   /* 0.5A:  0.30V */
+    {  1024,  410 },   /* 1.0A:  0.40V (接近饱和) */
+    {  3072,  512 },   /* 3.0A:  0.50V ≈ V_base */
+    {  5120,  522 },   /* 5.0A:  0.51V */
+    { 10240,  553 },   /* 10A:   0.54V */
+    { 20480,  604 },   /* 20A:   0.59V */
+    { 30720,  655 },   /* 30A:   0.64V */
+    { 51200,  758 },   /* 50A:   0.74V */
+};
+#define DT_LUT_N (sizeof(s_dt_lut) / sizeof(s_dt_lut[0]))
+
+static int32_t deadtime_comp_lookup(int32_t i_q10) {
+    int32_t s = (i_q10 < 0) ? -1 : 1;
+    int32_t a = (i_q10 < 0) ? -i_q10 : i_q10;
+    int32_t v;
+    if (a >= s_dt_lut[DT_LUT_N - 1].i_q10) {
+        uint32_t n = DT_LUT_N - 1;
+        int32_t di = s_dt_lut[n].i_q10 - s_dt_lut[n - 1].i_q10;
+        int32_t dv = s_dt_lut[n].v_q10 - s_dt_lut[n - 1].v_q10;
+        v = s_dt_lut[n].v_q10 + (int32_t)((int64_t)(a - s_dt_lut[n].i_q10) * dv / di);
+    } else {
+        uint32_t i;
+        for (i = 1; i < DT_LUT_N; i++) {
+            if (a <= s_dt_lut[i].i_q10) break;
+        }
+        int32_t di = s_dt_lut[i].i_q10 - s_dt_lut[i - 1].i_q10;
+        int32_t dv = s_dt_lut[i].v_q10 - s_dt_lut[i - 1].v_q10;
+        v = s_dt_lut[i - 1].v_q10 + (int32_t)((int64_t)(a - s_dt_lut[i - 1].i_q10) * dv / di);
+    }
+    return s * v;
+}
+#endif  /* USE_DEADTIME_COMPENSATION */
+
 /*******************************************************************************
   : deadtime_compensation_3phase
-    : 死区补偿函数，基于三相电流方向进行补偿（精度优于dq轴方式）
+    : 死区补偿，基于三相电流幅值查表 (精度优于固定值 sign 方式)
     : controller - 控制器结构体指针
   :
-    : 根据三相电流方向计算各相补偿电压，经Clarke+Park变换到dq坐标系叠加
-          补偿原理：Vx_comp = sign(Ix) × Vdc × Td / Ts
-          过零区处理：电流小于阈值时，线性过渡补偿量
-          Ic = -(Ia+Ib)，三相平衡，直接使用两相Clarke变换
+    : 根据三相电流查 s_dt_lut 得补偿电压，经 Clarke+Park 变换到 dq 坐标系叠加
+          Ic = -(Ia+Ib)，三相平衡，直接使用两相 Clarke 变换
+          标定: bwtest10 (锁转子开环扫表)
 ********************************************************************************/
 void deadtime_compensation_3phase(ControllerStruct* controller) {
 #if USE_DEADTIME_COMPENSATION
@@ -232,25 +316,8 @@ void deadtime_compensation_3phase(ControllerStruct* controller) {
     int32_t Valpha_comp, Vbeta_comp;
     int32_t Vd_comp, Vq_comp;
 
-    // A相补偿（根据Ia方向）
-    if (controller->I_a > DEADTIME_CURRENT_THRESHOLD) {
-        Va_comp = DEADTIME_COMP_VOLTAGE;
-    } else if (controller->I_a < -DEADTIME_CURRENT_THRESHOLD) {
-        Va_comp = -DEADTIME_COMP_VOLTAGE;
-    } else {
-        // 过零区：线性插值，平滑过渡
-        Va_comp = (controller->I_a * DEADTIME_COMP_VOLTAGE) / DEADTIME_CURRENT_THRESHOLD;
-    }
-
-    // B相补偿（根据Ib方向）
-    if (controller->I_b > DEADTIME_CURRENT_THRESHOLD) {
-        Vb_comp = DEADTIME_COMP_VOLTAGE;
-    } else if (controller->I_b < -DEADTIME_CURRENT_THRESHOLD) {
-        Vb_comp = -DEADTIME_COMP_VOLTAGE;
-    } else {
-        // 过零区：线性插值，平滑过渡
-        Vb_comp = (controller->I_b * DEADTIME_COMP_VOLTAGE) / DEADTIME_CURRENT_THRESHOLD;
-    }
+    Va_comp = deadtime_comp_lookup(controller->I_a);
+    Vb_comp = deadtime_comp_lookup(controller->I_b);
 
     // Clarke变换：abc → αβ（Ic=-Ia-Ib，三相平衡）
     clarke_transf(Va_comp, Vb_comp, &Valpha_comp, &Vbeta_comp);

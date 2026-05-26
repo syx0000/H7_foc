@@ -492,6 +492,20 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
         g_vdc_raw        = (vdc1 + vdc2) / 2;
         g_temp_motor_raw = temp_motor;
         g_temp_mos_raw   = temp_mos;
+
+        /* 更新 SVPWM 用的实时母线电压 (V), 分压比 21:1, 3.3V/65535 */
+        extern volatile uint16_t g_udc_volt;
+        extern volatile int16_t  g_vs_limit;
+        uint16_t udc_v = (uint16_t)(g_vdc_raw * 33U * 21U / 65535U / 10U);
+        if (udc_v < 10) udc_v = 10;   /* 防除零 (最低 10V) */
+        g_udc_volt = udc_v;
+        /* 电压矢量限幅: 系数 615 = 1024 × 0.60, 比线性区 Vdc/√3 (591) 高 4%
+         * 进入轻度过调制 I 区, svpwm_calc 内部等比缩放到六边形边界 (Minimum-Phase)
+         * 48V 母线: 上限 28.8V (vs 线性区 27.7V), 多 1.1V 给 BEMF/Rs 用
+         * 谐波小幅增加 (5/7 次), 高速大电流时收益明显 */
+        int32_t vs_lim = (int32_t)udc_v * 615;
+        if (vs_lim > 32000) vs_lim = 32000;  /* int16 安全上限 */
+        g_vs_limit = (int16_t)vs_lim;
     }
 }
 

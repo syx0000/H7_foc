@@ -70,7 +70,7 @@ void Encoder_data_Calculate(ControllerStruct* controller, uint16_t hz) {
         if (dtheta < -32768) dtheta += 65536;
 
         /* 延迟补偿 */
-        int32_t theta_comp = 0;//(dtheta * 3) / 10;
+        int32_t theta_comp = (dtheta * 3) / 10;
 
         /* 保存未补偿的原始值（避免递归误差累积） */
         theta_elec_last = controller->theta_elec;

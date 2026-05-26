@@ -53,12 +53,12 @@ typedef int32_t  INT32;
 #endif
 
 /**********************************************************************************************/
-// STM32H7 16位ADC + 10x运放 + 0.0025Ω采样电阻
-// I(A) = (raw - offset) * 3.3 / 65535 / 10 / 0.0025
-// I_Q10 = I * 1024 = (raw - offset) * 3.3 * 1024 / 65535 / 10 / 0.0025
-//       ≈ (raw - offset) * 33 / 16   (误差 <0.01%)
+// STM32H7 16位ADC + 10x运放 + 采样电阻 (两板硬件支持)
+//   板 V1 (0.0025Ω):  I_Q10 = (raw-offset) * 33 / 16   ← 当前默认
+//   板 V2 (0.00125Ω): I_Q10 = (raw-offset) * 33 / 8    (量程加倍, 切板时改 DENOMINATOR=8)
+// 推导: I_Q10 = (raw-offset) * 3.3 * 1024 / 65535 / 10 / Rshunt
 #define CURRENT_TRANS_NUMERATOR 33
-#define CURRENT_TRANS_DENOMINATOR 8
+#define CURRENT_TRANS_DENOMINATOR 16    /* V1 板, 切 V2 板改 8 */
 
 //
 // 编码器分辨率常量 - DPT 双磁编码器 24位
@@ -73,7 +73,9 @@ typedef int32_t  INT32;
 #define ENCODER_10BIT_DIV 14   // 24-10=14，raw*360 >> 14 → real_position 1°/1024
 
 /**********************************************************************************************/
-#define UDC 48    //=1699.6%24
+extern volatile uint16_t g_udc_volt;   /* 实时母线电压 (V), ADC 1kHz 更新, 初始 48 */
+#define UDC g_udc_volt                 /* SVPWM 用, 跟踪实际 Vdc 而非硬编码 */
+extern volatile int16_t  g_vs_limit;   /* 动态电压矢量限幅 Q10 = Vdc/√3×1024, ADC 更新 */
 extern uint8_t NPP;
 
 #define BUFF_SIZE (1024U)

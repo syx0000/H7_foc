@@ -242,7 +242,7 @@ int main(void)
 
 			/* 故障检测 */
 			dcVoltageProFunc();          // 母线过/欠压
-			// boradTempProFunc();          // 板温过温
+			boradTempProFunc();          // 板温过温
 			// busOverCurrentCheck();       // 母线过流
 			// LockedRotorProFunc();        // 堵转检测
 			//driverChipFaultCheck();      // DRV8353 nFAULT 引脚

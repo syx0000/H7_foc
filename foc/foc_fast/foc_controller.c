@@ -11,6 +11,8 @@
 uint32_t MAX_CURRENT_PRE        = 0;
 uint32_t DEFAULT_MAX_SPEED      = 0;
 uint32_t INC_PID_POSITION_LIMIT = 0;
+volatile uint16_t g_udc_volt    = 48;   /* 实时母线电压 V, ADC 1kHz 更新 */
+volatile int16_t  g_vs_limit    = 29520; /* 动态电压矢量限幅 Q10 = 48 × 615 (过调制 I), ADC 更新 */
 // 电机PID参数
 uint32_t INC_PID_POSITION_KP = 0;
 uint32_t INC_PID_POSITION_KI = 0;
@@ -48,7 +50,7 @@ void set_ver_par(uint8_t id) {
   if (id == 90) {
     // motor_h7_0426 配套：pole_pairs=8，25:1减速，初始保守PID，后续再调
     NPP               = 8;
-    DEFAULT_MAX_SPEED = 100 * 25 * 1024;       // 40rpm * 减速比25 * Q10
+    DEFAULT_MAX_SPEED = 110 * 25 * 1024;       // 110rpm 输出端, 给 100rpm 工作点留 10% 裕量
 
     INC_PID_POSITION_KP = 800;
     INC_PID_POSITION_KI = 5;
@@ -87,7 +89,7 @@ FlashSavedData flash_data = {
     //.Current_Kp          = INC_PID_CURRENT_KP,
     //.Current_Ki          = INC_PID_CURRENT_KI,
     //.Current_Kd          = INC_PID_CURRENT_KD,
-    .Pid_CurrentLimit     = INC_PID_CURRENT_LIMIT,
+    .Pid_CurrentLimit     = DEFAULT_PID_CURRENT_LIMIT,
     .ArrivedFlag          = 0,
     .PositionArrivedValue = POSITION_ARRIVED_RANGE,
     .SpeedArrivedValue    = SPEED_ARRIVED_RANGE,

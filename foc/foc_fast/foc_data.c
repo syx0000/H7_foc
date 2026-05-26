@@ -44,7 +44,7 @@ void ResetControlData(ControllerStruct* controller) {
                                      controller->FlashData.Current_Ki,
                                      controller->FlashData.Current_Kd,
                                      DEFAULT_PID_DIV,
-                                     controller->FlashData.Pid_CurrentLimit);
+                                     DEFAULT_PID_CURRENT_LIMIT);  /* 编译期常量, 不从 Flash 读 */
     controller->IncPID_DAxis.PidRun = IncPIDCal;
 
     // Iq PID
@@ -54,7 +54,7 @@ void ResetControlData(ControllerStruct* controller) {
                                      controller->FlashData.Current_Ki,
                                      controller->FlashData.Current_Kd,
                                      DEFAULT_PID_DIV,
-                                     controller->FlashData.Pid_CurrentLimit);
+                                     DEFAULT_PID_CURRENT_LIMIT);  /* 编译期常量, 不从 Flash 读 */
     controller->IncPID_QAxis.PidRun = IncPIDCal;
 
     // Speed PID
@@ -261,7 +261,7 @@ uint8_t DefualtPidValue(FlashSavedData* FlashData) {
     FlashData->Current_Kp       = INC_PID_CURRENT_KP;
     FlashData->Current_Ki       = INC_PID_CURRENT_KI;
     FlashData->Current_Kd       = INC_PID_CURRENT_KD;
-    FlashData->Pid_CurrentLimit = INC_PID_CURRENT_LIMIT;
+    FlashData->Pid_CurrentLimit = DEFAULT_PID_CURRENT_LIMIT;
     return 0;
 }
 

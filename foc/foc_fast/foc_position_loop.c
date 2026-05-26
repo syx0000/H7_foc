@@ -11,9 +11,8 @@
 #include "math.h"
 #include "stdlib.h"
 
-/* 默认梯形规划: 100 output rpm 巡航 / 230 output rpm/s 加速 (0.435s 加速时间).
- * 对齐 DEFAULT_MAX_SPEED = 载端 100rpm 硬限幅; 测试架不够用 (母线电容 ~100µF, 无刹车电阻)
- * 时需下调 VMAX。 */
+/* 默认梯形规划: 100 output rpm 巡航 / 200 output rpm/s 加速.
+ * VMAX 不超过 DEFAULT_MAX_SPEED=110rpm, 留 10% 余量给速度环跟踪。 */
 #define POS_TRAPEZOID_DEFAULT_VMAX_RPM   100.0f
 #define POS_TRAPEZOID_DEFAULT_AMAX_RPS   200.0f
 /* output rpm → LSB/tick 系数 (位置环 Ts = 1/2500 s) */

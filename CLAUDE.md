@@ -152,7 +152,11 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
 
 ### 电流环前馈与保护参数
 - **反电动势前馈**: `USE_BEMF_FF = 1`（默认开启）
-  - Vd_ff = -ωe·Lq·Iq, Vq_ff = ωe·(Ld·Id + ψ_f)
+  - Vd_ff = -ωe·Lq·Iq_ref, Vq_ff = ωe·(Ld·Id_ref + ψ_f)
+  - **解耦项用指令侧电流**（`I_q_ref_filterd / I_d_ref`），避免反馈侧 PWM 纹波/ADC 噪声经 ωe·L 放大灌进 V_dq
+  - **ωe 一阶 LPF**（α=1/8，~200Hz @10kHz）抑制 `dtheta_mech` 差分量化噪声
+  - **FF 输出软限幅** |Vff| ≤ 0.85·g_vs_limit，给 PI 至少 15% 矢量预算
+  - **动态 PI OutputMax**: 矢量预算 = g_vs_limit - |Vff_pred| - 死区，含 ωe·Ld·Id 项（不再只算 ψ_f）
   - 参数来源: Flash 辨识值 (Rs/Ld/Lq/ψ_f)
 - **速度环电流限幅**: `INC_PID_SPEED_LIMIT = 10A`（Q10 = 10240）
 - **速度环斜坡**: `MIN_ACC_TIME = 400ms`（加速度 250 rpm/s，对齐梯形规划）
@@ -166,7 +170,7 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
   - CH4: 输出比较模式（TIMING），用于编码器预触发
   - TRGO: 触发ADC注入采样（10kHz）
   - 中断: CC4中断（DPT 异步读取触发）
-  - 死区配置: MCU端DTG=12 (50ns)，实际由DRV8353RH内部100ns主导，有效死区100ns
+  - 死区配置: MCU端DTG=120 (500ns @240MHz), DRV8353RH内部100ns, 有效死区500ns (MCU主导)
 
 - **TIM2**: 备用PWM定时器（中央对齐模式1）
 
@@ -197,7 +201,7 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
   - 驱动能力: IDRIVEP≈300mA / IDRIVEN≈600mA（IDRIVE引脚470kΩ下拉）
   - 电流采样增益: 10 V/V（GAIN引脚配置）
   - 内部死区: 100ns（硬件固化，不可配置）
-  - 与MCU死区叠加: 实际有效死区 = max(MCU_DTG, DRV_internal) = 100ns
+  - 与MCU死区叠加: 实际有效死区 = max(MCU_DTG=500ns, DRV_internal=100ns) = 500ns
 
 ## 编码器
 

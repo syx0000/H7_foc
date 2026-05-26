@@ -32,5 +32,6 @@ void TestMotorParamsIdent(void);
 void TestAutoTuneSpeed(void);
 void TestAutoTuneCurrent(void);
 void TestAutoTunePosition(void);
+void TestDeadtimeCalibration(void);
 
 #endif

@@ -65,13 +65,20 @@ PI 饱和场景:
 
 ## 4. 修复优先级
 
-| P | 项 | 改法 | 预期效果 | 改动量 |
-|---|----|------|----------|--------|
-| **P0** | PI OutputMax 给 BEMF 留空间 | 拆成 `INC_PID_CURRENT_PI_LIMIT = 12288` (12 V)；`limit_norm` 仍用 27 V | BEMF FF 真正生效，100 rpm 扭矩 +30~50% | 1 常量 |
-| P1 | 提高 `DEFAULT_MAX_SPEED` 到 110 rpm | `foc_controller.c:51` 改值 | 给工作点 10% 裕量，加减速不饱和 | 1 行 |
-| P1 | 重新标定 ψ_f / Ld / Lq | `bwtest3 → bwtest4` | 前馈系数精度上去 | 跑测试 |
-| P2 | 死区补偿电流相关查表 | 三段斜率（小电流线性 / 中段饱和 / 大电流定值） | 谐波降低 | 改函数 |
-| P2 | SVPWM 过调制注入零序 | 把线性区扩到 Vdc / √3 × 1.155 ≈ 32 V | 电压上限 +15% | 改 svpwm_calc |
+| P | 项 | 改法 | 状态 | 改动量 |
+|---|----|------|------|--------|
+| **P0** | PI OutputMax 给 BEMF 留空间 | 静态拆 `INC_PID_CURRENT_PI_LIMIT = 12288` + 动态矢量预算 (`g_vs_limit - sqrt(Vd_ff_pred²+Vq_ff_pred²)·1024 - 1V`，含 ψ_f/Ld·Id/Lq·Iq 三项) | ✅ 已实现 (含动态化 + ωe LPF 200Hz + FF 0.85·Vs 软限幅) | 常量+ISR 一段 |
+| P1 | 提高 `DEFAULT_MAX_SPEED` 到 110 rpm | `foc_controller.c:51` 改值 + 超速保护阈值同步 2850/2950 rpm 电机端 | ✅ 已实现 | 2 行 |
+| P1 | 重新标定 ψ_f / Ld / Lq | `bwtest3 → bwtest4` | ⏳ 待跑测试 | 跑测试 |
+| **P2+** | UDC 硬编码 → 实时 ADC 采样 (附加项) | `g_udc_volt` 跟随母线, SVPWM 调制度跟踪 | ✅ 已实现 | bsp.h+adc.c |
+| **P2+** | 总电压限幅 `g_vs_limit` 动态化 (附加项) | `Vdc/√3×1024` 实时算, `limit_norm` 用动态值 | ✅ 已实现 | adc.c+kernel |
+| P2 | 死区补偿电流相关查表 | LUT (10 点) + bwtest10 标定工具 | ✅ 已实现 (默认理论值, 待标定) | 改函数+新增 ifly_test |
+| P2 | SVPWM 过调制注入零序 | 把线性区扩到 Vdc / √3 × 1.155 ≈ 32 V | ⏸ 未做 (改动量大) | 改 svpwm_calc |
+| **附加** | limit_norm uint64 防溢出 | `norm_sq` 用 uint64 + saturate 再传 qsqrt | ✅ 已实现 | 1 函数 |
+| **附加** | 超速保护恢复 | `#if 0 → #if 1`, 阈值 2600→2850 rpm | ✅ 已实现 | 1 行 |
+| **附加** | Init_IncPID 加 saturated=0 | 不依赖全局零初始化兜底 | ✅ 已实现 | 1 行 |
+| **附加** | 0x7FD 协议 + Kt LUT (CAN) | 0x2F05/06/07 SDO + ISR 直发 0x7FD | ✅ 已实现 | can_wly 模块 |
+| **附加** | 串口扭矩 N·m 单位 | tar 字段 atof 走 LUT, 限幅改 MaxCurrent | ✅ 已实现 | foc_bsp.c |
 
 ## 5. P0 详细改法
 

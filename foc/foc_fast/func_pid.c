@@ -75,6 +75,7 @@ void Init_IncPID(IncPID* pid, uint32_t Kp, uint32_t Ki, uint32_t Kd, uint16_t PI
   pid->PrevError = 0;
   pid->InPut     = 0;
   pid->OutPut    = 0;
+  pid->saturated = 0;
 }
 
 /*******************************************************************************

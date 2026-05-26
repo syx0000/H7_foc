@@ -194,6 +194,8 @@ void dbg_cmd_set(void) {
             TestAutoTunePosition();
         } else if (which == 9) {
             TestPositionLoopBandwidth();
+        } else if (which == 10) {
+            TestDeadtimeCalibration();
         }
     }
 
@@ -962,9 +964,9 @@ void dbg_log_print(void) {
         int sat_id           = (id_pid >=  id_pid_max - 1) ? 1
                              : (id_pid <= -id_pid_max + 1) ? -1 : 0;
 
-        /* Vs 矢量幅值 (Q10 V) -> 0.01V; INC_PID_CURRENT_LIMIT = 28467 ≈ 27.8V Q10 */
+        /* Vs 矢量幅值 (Q10 V); g_vs_limit = Vdc/√3×1024 动态跟踪母线 */
         int32_t vs_q10       = (int32_t)sqrtf((float)c->V_d * c->V_d + (float)c->V_q * c->V_q);
-        int sat_vs           = (vs_q10 >= INC_PID_CURRENT_LIMIT - 16) ? 1 : 0;
+        int sat_vs           = (vs_q10 >= g_vs_limit - 16) ? 1 : 0;
 
         /* 调制度 = Vs / (Udc/sqrt(3))(SVPWM 线性区上限). Udc 0.1V → V; */
         float udc_v          = (float)motorProValue.Udc * 0.1f;
@@ -1005,7 +1007,7 @@ void dbg_log_print(void) {
                (long)(c->I_q_ref_filterd - c->I_q),
                (long)c->I_d, (long)c->I_d_ref,
                (long)c->V_q, (long)c->V_d, (long)vs_q10,
-               INC_PID_CURRENT_LIMIT,
+               (int)g_vs_limit,
                sat_iq, sat_id, sat_vs,
                udc_v, mod_pct,
                USE_BEMF_FF, vd_bemf_v, vq_bemf_v,

@@ -239,3 +239,133 @@ void TestAutoTunePosition(void) {
   /* 位置环 autoTune 不依赖电机参数, 直接按经验公式计算 */
   autoTunePositionLoopPI();
 }
+
+/*******************************************************************************
+ * 死区补偿查表自动标定 (bwtest10)
+ *
+ * 原理: 锁定转子, theta_elec=0 钉死, 注入恒定 V_d (沿 A 相)
+ *       闭环逼近一组目标电流, 反推 V_dt = V_d - Rs × |I_a|
+ *       输出 LUT 数据到串口, 用户复制到 foc_current_loop.c 的 s_dt_lut
+ *
+ * 前置: 1) 转子机械锁住 (手柄/夹具) — 否则会转, 数据无效
+ *       2) bwtest3 跑过, Rs 在 Flash temp1 (MotorParamFlag 有效)
+ *       3) 上电后通信确认电源 48V 接好
+ *
+ * 安全: V_d 上限 8V (对应 Rs=0.08Ω 时电流约 100A, 实际靠 i_target 控制)
+ *       任意点 V_d 加到 8V 仍不收敛 → 终止 (转子未锁 / Rs 错)
+ *       每点超时 10s → 终止
+ ******************************************************************************/
+void TestDeadtimeCalibration(void) {
+  if (controller_eyou.FlashData.MotorParamFlag != OFFEST_IS_CORRECTED_FLAG) {
+    printf("Dt cal FAILED: motor params not identified, run bwtest3 first\r\n");
+    return;
+  }
+  union { float f; int32_t i; } u;
+  u.i = controller_eyou.FlashData.temp1;
+  float Rs = u.f;
+  if (Rs <= 0.0f || Rs > 1.0f) {
+    printf("Dt cal FAILED: invalid Rs=%.4f Ohm\r\n", Rs);
+    return;
+  }
+
+  printf("\r\n===== Deadtime Calibration =====\r\n");
+  printf("WARNING: rotor MUST be locked (held mechanically). Starting in 3s...\r\n");
+  HAL_Delay(3000);
+  printf("Rs (Flash) = %.4f Ohm\r\n", Rs);
+
+  /* 目标电流序列 (Q10), 从小到大 */
+  const int32_t targets_q10[] = { 512, 1024, 2048, 5120, 10240, 20480, 30720 };
+  const int N = sizeof(targets_q10) / sizeof(targets_q10[0]);
+  int32_t v_dt_results[7];
+  int32_t i_a_results[7];
+  int success_count = 0;
+  int32_t v_d_q10 = 0;
+
+  uint8_t old_foc_run = controller_eyou.foc_run;
+
+  /* 进辨识通道 (旁路 PI + 编码器不覆盖 theta_elec, 同 measurePhaseResistance) */
+  controller_eyou.ident_test.enable = 1;
+  controller_eyou.ident_test.done = 0;
+  controller_eyou.ident_test.amplitude = 0;
+  controller_eyou.ident_test.settle_samples = 0xFFFFFFFF;
+  controller_eyou.ident_test.measure_samples = 0;
+  controller_eyou.ident_test.sample_count = 0;
+  controller_eyou.theta_elec = 0;
+  controller_eyou.V_d = 0;
+  controller_eyou.V_q = 0;
+  controller_eyou.foc_run = 1;
+
+  printf("Idx  I_target(A)  V_d(V)   I_a_avg(A)  V_dt(V)  Iq10  Vq10\r\n");
+
+  for (int idx = 0; idx < N; idx++) {
+    int32_t i_target = targets_q10[idx];
+    int32_t tol = i_target / 20;        /* 5% 收敛容差 */
+    if (tol < 50) tol = 50;             /* 过零区最小容差 0.05A */
+
+    /* 闭环逼近: 每 5ms 加 0.05V, 直到 |I_a - target| < tol */
+    uint32_t timeout_ms = 0;
+    while (1) {
+      int32_t i_a_now = controller_eyou.I_a;
+      int32_t err = i_target - i_a_now;
+      if (err < 0) err = -err;
+      if (err < tol) break;
+
+      v_d_q10 += 50;
+      if (v_d_q10 > 8 * 1024) {
+        printf("FAIL idx=%d: V_d > 8V no convergence (rotor not locked? Rs wrong?)\r\n", idx);
+        goto cleanup;
+      }
+      controller_eyou.V_d = v_d_q10;
+      HAL_Delay(5);
+      timeout_ms += 5;
+      if (timeout_ms > 10000) {
+        printf("FAIL idx=%d: timeout 10s, Vd=%.3fV Ia=%.3fA tar=%.3fA\r\n",
+               idx, v_d_q10 / 1024.0f, i_a_now / 1024.0f, i_target / 1024.0f);
+        goto cleanup;
+      }
+    }
+
+    /* 稳态等待 200ms + 采样 100ms 平均 */
+    HAL_Delay(200);
+    int64_t sum_ia = 0;
+    const int n_samp = 100;
+    for (int k = 0; k < n_samp; k++) {
+      HAL_Delay(1);
+      sum_ia += controller_eyou.I_a;
+    }
+    int32_t i_a_avg_q10 = (int32_t)(sum_ia / n_samp);
+    float i_a_avg = i_a_avg_q10 / 1024.0f;
+    float v_d = v_d_q10 / 1024.0f;
+    float i_abs = (i_a_avg < 0) ? -i_a_avg : i_a_avg;
+    float v_dt = v_d - Rs * i_abs;
+    int32_t v_dt_q10 = (int32_t)(v_dt * 1024.0f);
+    if (v_dt_q10 < 0) v_dt_q10 = 0;     /* 防 Rs 偏差导致负值 */
+
+    i_a_results[idx]  = i_a_avg_q10 < 0 ? -i_a_avg_q10 : i_a_avg_q10;
+    v_dt_results[idx] = v_dt_q10;
+    success_count++;
+
+    printf("%-3d  %7.2f     %6.3f   %7.3f     %5.3f    %4ld  %4ld\r\n",
+           idx, i_target / 1024.0f, v_d, i_a_avg, v_dt,
+           (long)i_a_results[idx], (long)v_dt_q10);
+  }
+
+cleanup:
+  controller_eyou.ident_test.enable = 0;
+  controller_eyou.V_d = 0;
+  controller_eyou.V_q = 0;
+  set_phase_voltage(&controller_eyou, 0, 0, 0);
+  controller_eyou.foc_run = old_foc_run;
+
+  /* 打印 LUT 复制粘贴格式 */
+  printf("\r\n----- s_dt_lut copy-paste data -----\r\n");
+  printf("static const dt_pt_t s_dt_lut[] = {\r\n");
+  printf("    {     0,    0 },   /* zero crossing */\r\n");
+  for (int i = 0; i < success_count; i++) {
+    printf("    { %5ld, %4ld },   /* %.2fA -> %.3fV */\r\n",
+           (long)i_a_results[i], (long)v_dt_results[i],
+           i_a_results[i] / 1024.0f, v_dt_results[i] / 1024.0f);
+  }
+  printf("};\r\n");
+  printf("================================================\r\n");
+}
