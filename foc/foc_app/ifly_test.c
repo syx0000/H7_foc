@@ -93,7 +93,7 @@ void TestUVWCurrentOver(void) {
 void TestCurrentLoopBandwidth(void) {
   /* 保守版: 10-2500Hz 扫频, 注入 0.3A (Q10=307), 工作点偏置 0.5A (Q10=512) */
   controller_eyou.controller_mode = TEST_MOTOR_CURRENT_MODE;
-  controller_eyou.I_q_ref         = 512;
+  controller_eyou.I_q_ref         = 666;
   controller_eyou.foc_run         = 1;
 
   bw_test_init(&controller_eyou.bw_test, 10.0f, 2500.0f, 307.0f);

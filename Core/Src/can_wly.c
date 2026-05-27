@@ -37,6 +37,7 @@ static uint32_t          s_test_ampl_q10   = 256;        /* 0x2F07 默认 0.25 A
 static volatile uint32_t s_test_phase_acc  = 0;
 static uint32_t          s_test_phase_step = 0;          /* freq/fs * 2^32, 启动时算好 */
 static uint32_t          s_test_tx_fail_cnt = 0;         /* 0x7FD FIFO 满丢帧计数 */
+static uint32_t          s_test_tx_ok_cnt   = 0;         /* 0x7FD 发送成功计数 */
 
 /* 发送失败计数器 (调试用) */
 static uint32_t s_tx_fail_count = 0;
@@ -45,7 +46,7 @@ static uint32_t s_tx_fail_count = 0;
 #define CAN_TIMEOUT_MS 200
 static volatile uint16_t s_can_timeout_cnt = 0;
 static uint8_t s_can_timeout_enabled = 0;
-uint8_t g_can_timeout_force_disable = 1;  /* 调试期间默认关闭, 联调时改回 0 */
+uint8_t g_can_timeout_force_disable = 0;  /* CAN 超时保护已启用 */
 
 /* ========== 访问全局控制器 ========== */
 extern ControllerStruct controller_eyou;
@@ -476,6 +477,16 @@ static uint8_t sdo_write_value(uint16_t idx, uint8_t subidx, const uint8_t *in) 
         }
         return 0;
     }
+    case CAN_WLY_OD_CALI: {
+        /* 0x2F01 sub=1 data[0]=1: 触发学零位 (主循环执行, ISR 只设标志)
+         * CAN 帧: 60x 23 01 2F 01 01 FF FF FF */
+        if (subidx == 0x01 && in[0] == 0x01) {
+            extern volatile uint8_t g_can_cali_request;
+            g_can_cali_request = 1;
+            return 1;
+        }
+        return 0;
+    }
     case CAN_WLY_OD_AUTO_REPORT: {
         /* 0x2F05 测试命令: 0=停 0x7FD 流, 1=启 0x7FD 流 (单频注入), 2=开 1ms 0x7FE 周报
          * 三条命令独立, 互不影响对方状态 */
@@ -756,5 +767,49 @@ void can_wly_test_isr_post(int32_t iq_ref_filterd, int32_t iq_fb) {
     d[6] = (uint8_t)(fb_u >> 16);  d[7] = (uint8_t)(fb_u >> 24);
     if (fdcan_send(CAN_WLY_ID_TEST_RESULT, d, 8) != HAL_OK) {
         s_test_tx_fail_cnt++;
+    } else {
+        s_test_tx_ok_cnt++;
     }
+}
+
+/* ========== 串口 dbg 命令接口 (模拟 CAN SDO 写) ========== */
+
+uint32_t can_wly_get_test_freq(void) {
+    return s_test_freq_hz;
+}
+
+void can_wly_set_test_freq(uint32_t hz) {
+    if (hz == 0) hz = 1;
+    if (hz > 5000) hz = 5000;
+    s_test_freq_hz = hz;
+}
+
+uint32_t can_wly_get_test_ampl(void) {
+    return s_test_ampl_q10;
+}
+
+void can_wly_set_test_ampl(uint32_t q10) {
+    if (q10 > 30 * 1024U) q10 = 30 * 1024U;
+    s_test_ampl_q10 = q10;
+}
+
+void can_wly_test_start(void) {
+    uint64_t step = ((uint64_t)s_test_freq_hz << 32) / 10000ULL;
+    s_test_phase_step = (uint32_t)step;
+    s_test_phase_acc = 0;
+    s_test_tx_ok_cnt = 0;
+    s_test_tx_fail_cnt = 0;
+    s_test_active = 1;
+}
+
+void can_wly_test_stop(void) {
+    s_test_active = 0;
+}
+
+uint32_t can_wly_get_test_tx_ok(void) {
+    return s_test_tx_ok_cnt;
+}
+
+uint32_t can_wly_get_test_tx_fail(void) {
+    return s_test_tx_fail_cnt;
 }

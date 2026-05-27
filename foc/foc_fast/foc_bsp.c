@@ -45,8 +45,8 @@ volatile uint16_t testLogFlag  = 0;
  * 默认: offset=-12°/−68°(正/反转100rpm调好), comp=0(预留) */
 int16_t g_theta_offset_pos = 0;//-120;   /* -12.0° */
 int16_t g_theta_offset_neg = 0;//-680;   /* -68.0° */
-int16_t g_theta_comp_pos = 23;
-int16_t g_theta_comp_neg = 23;
+int16_t g_theta_comp_pos = 20;//23;
+int16_t g_theta_comp_neg = 26;//23;
 
 extern ifly_Err_Pro_Type motorProValue;
 extern ErrMessgeStruct ErrMessge[ERRMESSGECOUNT];
@@ -335,15 +335,29 @@ void dbg_cmd_set(void) {
     }
 
     /* Cali: 电角度偏置辨识 + 擦 Flash + 重新写入
-       流程同 PHU: ElecAngleEstimate → Flash_EraseSector → WriteDataToFlash */
+       流程同 PHU: ElecAngleEstimate → Flash_EraseSector → WriteDataToFlash
+       注意：必须先停机 (foc_run=0) 避免 ISR 覆盖开环 PWM
+       故障后 MOE/CCER 已被关闭, 需要重新使能才能输出 PWM */
     if (NULL != strstr((char *)dbgRecvBuf, "Cali")) {
+        uint8_t old_run = controller_eyou.foc_run;
+        controller_eyou.foc_run = 0;   /* 停机，禁用 ISR 闭环 */
+        controller_eyou.ServoErrFlag.All_Flag = 0;  /* 清故障标志，防止 1ms tick 再次关 PWM */
+        HAL_Delay(10);                  /* 等 ISR 退出 */
+
+        /* 重新使能 PWM 输出 (故障停机后 MOE=0, CCER=0) */
+        TIM1->CCER |= 0x0555u;         /* 使能 CH1/CH2/CH3 输出 */
+        __HAL_TIM_MOE_ENABLE(&htim1);   /* 使能主输出 */
+
         ElecAngleEstimate(&controller_eyou);
+
         if (Flash_EraseSector() != HAL_OK) {
             printf("Cali: Flash erase FAIL\r\n");
         } else {
             WriteDataToFlash();
             printf("Cali done\r\n");
         }
+
+        controller_eyou.foc_run = old_run;
     }
 
     if (NULL != strstr((char *)dbgRecvBuf, "Run")) {
@@ -487,6 +501,49 @@ void dbg_cmd_set(void) {
         token = strtok(loc, "compneg");
         g_theta_comp_neg = (int16_t)atoi((char *)token);
         printf("comp_neg=%d (×0.1)\r\n", g_theta_comp_neg);
+    }
+
+    /* testfreq<N>: 设置单频注入频率 (Hz, 等效 CAN 0x2F06) */
+    extern uint32_t can_wly_get_test_freq(void);
+    extern void can_wly_set_test_freq(uint32_t hz);
+    if (NULL != strstr((char *)dbgRecvBuf, "testfreq")) {
+        loc = strstr((char *)dbgRecvBuf, "testfreq");
+        token = strtok(loc, "testfreq");
+        uint32_t hz = (uint32_t)atoi((char *)token);
+        can_wly_set_test_freq(hz);
+        printf("test_freq=%u Hz\r\n", can_wly_get_test_freq());
+    }
+
+    /* testampl<N>: 设置单频注入幅值 (Q10, 等效 CAN 0x2F07, 1024=1A) */
+    extern uint32_t can_wly_get_test_ampl(void);
+    extern void can_wly_set_test_ampl(uint32_t q10);
+    if (NULL != strstr((char *)dbgRecvBuf, "testampl")) {
+        loc = strstr((char *)dbgRecvBuf, "testampl");
+        token = strtok(loc, "testampl");
+        uint32_t q10 = (uint32_t)atoi((char *)token);
+        can_wly_set_test_ampl(q10);
+        printf("test_ampl=%u Q10 (%.2f A)\r\n",
+               can_wly_get_test_ampl(), can_wly_get_test_ampl() / 1024.0f);
+    }
+
+    /* teststart: 启动单频注入 + 0x7FD 数据流 (等效 CAN 0x2F05 cmd=1) */
+    extern void can_wly_test_start(void);
+    if (NULL != strstr((char *)dbgRecvBuf, "teststart")) {
+        can_wly_test_start();
+        printf("test started: %u Hz, %.2f A\r\n",
+               can_wly_get_test_freq(), can_wly_get_test_ampl() / 1024.0f);
+    }
+
+    /* teststop: 停止单频注入 (等效 CAN 0x2F05 cmd=0) */
+    extern void can_wly_test_stop(void);
+    extern uint32_t can_wly_get_test_tx_ok(void);
+    extern uint32_t can_wly_get_test_tx_fail(void);
+    if (NULL != strstr((char *)dbgRecvBuf, "teststop")) {
+        uint32_t ok = can_wly_get_test_tx_ok();
+        uint32_t fail = can_wly_get_test_tx_fail();
+        can_wly_test_stop();
+        printf("test stopped: 0x7FD tx_ok=%u, tx_fail=%u\r\n",
+               (unsigned)ok, (unsigned)fail);
     }
 
     /* canstat: 打印 FDCAN 状态 + 重置 TX FIFO (恢复 Bus-Off / FIFO 卡死) */

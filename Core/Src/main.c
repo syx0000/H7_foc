@@ -61,6 +61,7 @@ extern ControllerStruct controller_eyou;
 uint8_t open_loop_mode = 0;  // 0=自动旋转, 1=编码器跟随
 int16_t v_d_test = 0;        // d轴电压（Q10格式）
 int16_t v_q_test = 512;      // q轴电压（Q10格式，约0.5V）
+volatile uint8_t g_can_cali_request = 0;  /* CAN 0x2F01 学零位请求标志 */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -223,6 +224,26 @@ int main(void)
     /* USER CODE BEGIN 3 */
 		/* 调试串口命令解析 */
 		dbg_cmd_set();
+
+		/* CAN 0x2F01 学零位请求 (ISR 设标志, 主循环执行) */
+		if (g_can_cali_request) {
+			g_can_cali_request = 0;
+			uint8_t old_run = controller_eyou.foc_run;
+			controller_eyou.foc_run = 0;
+			controller_eyou.ServoErrFlag.All_Flag = 0;
+			HAL_Delay(10);
+			TIM1->CCER |= 0x0555u;
+			__HAL_TIM_MOE_ENABLE(&htim1);
+			printf("CAN Cali start\r\n");
+			ElecAngleEstimate(&controller_eyou);
+			if (Flash_EraseSector() != HAL_OK) {
+				printf("CAN Cali: Flash erase FAIL\r\n");
+			} else {
+				WriteDataToFlash();
+				printf("CAN Cali done\r\n");
+			}
+			controller_eyou.foc_run = old_run;
+		}
 
 		/* CAN RX 调试帧异步打印 (canrxdbg 命令开启) */
 		can_wly_dbg_poll();

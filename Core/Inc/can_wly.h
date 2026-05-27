@@ -72,6 +72,7 @@ extern "C" {
 #define CAN_WLY_OD_DRI_SPD_KP   0x200C
 #define CAN_WLY_OD_DRI_SPD_KI   0x200D
 #define CAN_WLY_OD_NODE_ID      0x2F00  /* 节点地址 (自定义, 参考 motor_h7) */
+#define CAN_WLY_OD_CALI        0x2F01  /* 学零位: sub=1 data[0]=1 触发 ElecAngleEstimate */
 #define CAN_WLY_OD_AUTO_REPORT  0x2F05  /* 测试命令: 0=停 0x7FD 流, 1=启 0x7FD 流, 2=开 1ms 0x7FE 周报 */
 #define CAN_WLY_OD_TEST_FREQ    0x2F06  /* uint32, Hz, 单频注入频率 (cmd=1 启动用) */
 #define CAN_WLY_OD_TEST_AMPL    0x2F07  /* uint32, Q10 A, 单频注入幅值 (cmd=1 启动用) */

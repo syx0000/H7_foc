@@ -759,7 +759,7 @@ void bw_test_init(CurrentLoopBWTest* test, float freq_start, float freq_end, flo
 }
 
 /*******************************************************************************
-  bw_test_run - 每个电流环周期调用一次 (4kHz)
+  bw_test_run - 每个电流环周期调用一次 (10kHz)
   返回值: 叠加到 I_q_ref 上的注入信号 (Q10 格式)
 *******************************************************************************/
 int16_t bw_test_run(CurrentLoopBWTest* test, int32_t iq_feedback) {
