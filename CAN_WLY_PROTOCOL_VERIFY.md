@@ -61,7 +61,18 @@ g_can_wly_lim = {
 | `cantest5` | 0x601 D=`23 00 20 00 <-10.0f LE>` | SDO 写 0x2000 | ✅ pos_min 改变 + 恢复 |
 | `cantest6` | 0x701 D=`FF×7 FA` | 控制帧使能 | ✅ foc_run: 0→1 |
 | `cantest7` | 注帧后停 250ms | 超时保护 | ✅ |
-| `cantest8` | 0x500 12B MIT | MIT 解析 + PD 运算 | ✅ mode=11, Kp/Kd 生效 |
+| `cantest8` | 0x500 MIT 基础 | MIT 中点值 + 中等 Kp/Kd | ✅ mode=11, Kp/Kd 生效 |
+| `cantest9` | 0x500 MIT Kp 最大 | Kp=500, Kd=0 | ✅ 边界参数解析 |
+| `cantest10` | 0x500 MIT Kd 最大 | Kp=0, Kd=20 | ✅ 边界参数解析 |
+| `cantest11` | 0x500 MIT 正向运动 | p=+3.5rad, v=+10rad/s, Kp=50, Kd=3.8 | ✅ 正向位置/速度解析 |
+| `cantest12` | 0x500 MIT 负向运动 | p=-3.5rad, v=-10rad/s, Kp=50, Kd=3.8 | ✅ 负向位置/速度解析 |
+| `cantest13` | 0x500 MIT 最大正扭矩 | t=+500Nm, Kp=Kd=0 | ✅ 纯前馈正扭矩 |
+| `cantest14` | 0x500 MIT 最大负扭矩 | t=-500Nm, Kp=Kd=0 | ✅ 纯前馈负扭矩 |
+| `cantest15` | 0x500 MIT 位置上限 | p=+7rad (pos_max) | ✅ 边界位置解析 |
+| `cantest16` | 0x500 MIT 位置下限 | p=-7rad (pos_min) | ✅ 边界位置解析 |
+| `cantest17` | 0x500 MIT 速度上限 | v=+20rad/s (spd_max) | ✅ 边界速度解析 |
+| `cantest18` | 0x500 MIT 速度下限 | v=-20rad/s (spd_min) | ✅ 边界速度解析 |
+| `cantest19` | 0x500 MIT 典型阻抗 | Kp=100, Kd=5, t=+10Nm | ✅ 典型阻抗控制参数 |
 
 ## 第 2 层 USB-CAN 测试矩阵（参考）
 

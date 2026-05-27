@@ -6,6 +6,9 @@ SourceFiles=..\Core\Src\main.c;..\Core\Src\gpio.c;..\Core\Src\adc.c;..\Core\Src\
 HeaderPath=..\Drivers\STM32H7xx_HAL_Driver\Inc;..\Drivers\STM32H7xx_HAL_Driver\Inc\Legacy;..\Drivers\CMSIS\Device\ST\STM32H7xx\Include;..\Drivers\CMSIS\Include;..\Core\Inc;
 CDefines=USE_PWR_LDO_SUPPLY;USE_PWR_LDO_SUPPLY;USE_HAL_DRIVER;STM32H743xx;USE_HAL_DRIVER;USE_HAL_DRIVER;
 
+[]
+SourceFiles=;;
+
 [PreviousGenFiles]
 AdvancedFolderStructure=true
 HeaderFileListSize=9
