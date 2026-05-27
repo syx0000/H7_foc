@@ -36,20 +36,31 @@ extern volatile uint32_t g_temp_mos_raw;
 static uint8_t ovp_filter_cnt = 0;
 static uint8_t uvp_filter_cnt = 0;
 static uint8_t ot_board_filter_cnt = 0;
+static uint8_t ot_motor_filter_cnt = 0;
 static uint8_t oc_filter_cnt = 0;
 static uint8_t locked_filter_cnt = 0;
 static uint16_t spd_offset_cnt = 0;
 static uint16_t pos_offset_cnt = 0;
+/* 缺相保护滤波计数器 (4 个独立判据) */
+static uint16_t pl_kcl_cnt = 0;     /* KCL 失衡 */
+static uint16_t pl_low_a_cnt = 0;   /* A 相低电流 */
+static uint16_t pl_low_b_cnt = 0;   /* B 相低电流 */
+static uint16_t pl_low_c_cnt = 0;   /* C 相低电流 */
 
 /* 清除所有故障检测计数器 */
 static void clear_all_fault_counters(void) {
     ovp_filter_cnt = 0;
     uvp_filter_cnt = 0;
     ot_board_filter_cnt = 0;
+    ot_motor_filter_cnt = 0;
     oc_filter_cnt = 0;
     locked_filter_cnt = 0;
     spd_offset_cnt = 0;
     pos_offset_cnt = 0;
+    pl_kcl_cnt = 0;
+    pl_low_a_cnt = 0;
+    pl_low_b_cnt = 0;
+    pl_low_c_cnt = 0;
 }
 
 /* PLACEHOLDER_FAULT_IMPL */
@@ -60,15 +71,14 @@ static void clear_all_fault_counters(void) {
 void adc_convert(void) {
     motorProValue.Udc = VDC_ADC_TO_01V(g_vdc_raw);
     motorProValue.board_temp = TemperatureInquiry((uint16_t)g_temp_mos_raw);
-    motorProValue.motor_temp = TemperatureInquiry((uint16_t)g_temp_motor_raw);
+    motorProValue.motor_temp = MotorTemperatureInquiry((uint16_t)g_temp_motor_raw);
 }
 
 /*******************************************************************************
- * TemperatureInquiry - NTC ADC 值转温度（°C）
+ * TemperatureInquiry - MOS NTC ADC 值转温度（°C）
  * B 值公式：1/T = 1/T0 + ln(R/R0)/B
  * 硬件：10k 分压 + 10k NTC，ADC 16bit 3.3V
- * 电机 NTC B=3435，MOS NTC B=3950（motor_h7 实测）
- * 统一用 B=3950（MOS 侧），电机侧误差 <2°C 可接受
+ * MOS NTC B=3950（motor_h7 实测）
  ******************************************************************************/
 #include <math.h>
 
@@ -88,6 +98,68 @@ int8_t TemperatureInquiry(uint16_t adc_value) {
     int8_t temp_c = (int8_t)(temp_k - NTC_ABS_ZERO);
 
     return temp_c;
+}
+
+/*******************************************************************************
+ * MotorTemperatureInquiry - 绕组 NTC ADC 值转温度（°C）
+ * 规格：R25=10kΩ ±1%, B25/85=3435K ±1%
+ * 硬件：10k 上拉 + NTC 下拉，ADC 16bit 3.3V (TEMP_MOTOR 通道)
+ * 实现：查表 + 线性插值，覆盖 -20~200°C 每 5°C 一个点（Rnom，单位 Ω）
+ * Beta 公式在 -40~0°C / 100~200°C 误差较大（>10%），故用查表
+ ******************************************************************************/
+#define MOTOR_NTC_TMIN   (-20)
+#define MOTOR_NTC_TSTEP  5
+#define MOTOR_NTC_NPTS   45     /* -20, -15, ..., 200 °C */
+
+/* R25=10kΩ B=3435 NTC 标称电阻表 (Ω)，温度从 -20°C 起每 5°C */
+static const uint16_t motor_ntc_r_nom[MOTOR_NTC_NPTS] = {
+    /* -20  -15   -10    -5     0  */
+    65535, 54565, 43318, 34732, 27766,
+    /*   5   10    15    20    25  */
+    22346, 18094, 14748, 12096, 10000,
+    /*  30   35    40    45    50  */
+     8275,  6898,  5781,  4868,  4122,
+    /*  55   60    65    70    75  */
+     3505,  2993,  2566,  2208,  1907,
+    /*  80   85    90    95   100  */
+     1653,  1451,  1255,  1100,   966,
+    /* 105  110   115   120   125  */
+      851,   753,   667,   593,   528,
+    /* 130  135   140   145   150  */
+      472,   422,   379,   341,   307,
+    /* 155  160   165   170   175  */
+      277,   251,   228,   207,   188,
+    /* 180  185   190   195   200  */
+      171,   155,   142,   129,   118
+};
+/* 注：-20°C 实际 Rnom=69195Ω 超出 uint16，clamp 到 65535（饱和判极冷） */
+
+int8_t MotorTemperatureInquiry(uint16_t adc_value) {
+    /* raw 接近满量程 = NTC 开路 (未连接 / 接线断 / 引脚浮空被上拉)
+     * 阈值 64000: 对应 R_ntc ≈ 416kΩ, 远超 -40°C 时的 ~330kΩ 上限
+     * 返回 0 而非 MOTOR_NTC_TMIN, 避免下游误判极冷导致逻辑异常 */
+    if (adc_value == 0 || adc_value >= 64000) return 0;
+
+    /* V_adc/Vref = R_ntc/(R_pullup + R_ntc) -> R_ntc = R_pullup * adc/(FS-adc)
+     * 用 64 位中间量避免溢出 */
+    uint32_t fs_minus = 65535U - adc_value;
+    uint32_t r_ntc = (uint32_t)((uint64_t)10000U * adc_value / fs_minus);
+
+    /* 查表（电阻随温度递减）：找到 r_ntc 落入的区间 [r_hi, r_lo] */
+    if (r_ntc >= motor_ntc_r_nom[0]) return MOTOR_NTC_TMIN;
+    if (r_ntc <= motor_ntc_r_nom[MOTOR_NTC_NPTS - 1])
+        return (int8_t)(MOTOR_NTC_TMIN + MOTOR_NTC_TSTEP * (MOTOR_NTC_NPTS - 1));
+
+    int i = 0;
+    for (i = 0; i < MOTOR_NTC_NPTS - 1; i++) {
+        if (r_ntc >= motor_ntc_r_nom[i + 1]) break;
+    }
+    /* 区间 [i, i+1] 对应温度 [t_lo, t_lo+5]，电阻 [r_lo, r_hi] (r_lo > r_hi) */
+    int32_t t_lo = MOTOR_NTC_TMIN + MOTOR_NTC_TSTEP * i;
+    int32_t r_lo = motor_ntc_r_nom[i];
+    int32_t r_hi = motor_ntc_r_nom[i + 1];
+    int32_t t = t_lo + (MOTOR_NTC_TSTEP * (r_lo - (int32_t)r_ntc)) / (r_lo - r_hi);
+    return (int8_t)t;
 }
 
 /*******************************************************************************
@@ -134,6 +206,37 @@ int8_t boradTempProFunc(void) {
         }
     } else {
         ot_board_filter_cnt = 0;
+    }
+
+    return 0;
+}
+
+/*******************************************************************************
+ * motorTempProFunc - 电机绕组过温保护（两级：警告 + 停机）
+ * 警告级：Threshold.TemMortorWarn（默认 100°C）→ 串口打印警告
+ * 停机级：Threshold.TemMortor（默认 120°C）→ 置位 HighMotorTempErr
+ ******************************************************************************/
+static uint8_t motor_temp_warn_printed = 0;
+
+int8_t motorTempProFunc(void) {
+    int8_t temp = motorProValue.motor_temp;
+
+    if (temp >= (int8_t)Threshold.TemMortor) {
+        if (++ot_motor_filter_cnt >= FILTER_TIME) {
+            ot_motor_filter_cnt = FILTER_TIME;
+            controller_eyou.ServoErrFlag.Bit.HighMotorTempErr = 1;
+            return 1;
+        }
+    } else if (temp >= (int8_t)Threshold.TemMortorWarn) {
+        ot_motor_filter_cnt = 0;
+        if (!motor_temp_warn_printed) {
+            printf("WARN: motor temp %dC >= %d\r\n", temp, Threshold.TemMortorWarn);
+            motor_temp_warn_printed = 1;
+        }
+        return -1;
+    } else {
+        ot_motor_filter_cnt = 0;
+        motor_temp_warn_printed = 0;
     }
 
     return 0;
@@ -192,6 +295,124 @@ uint8_t LockedRotorProFunc(void) {
     }
 
     return 0;
+}
+
+/*******************************************************************************
+ * phaseLossProFunc - 缺相保护 (1ms 慢环)
+ *
+ * 物理背景:
+ *   三相 PMSM 任一相断线 (绕组开路 / 焊点脱落 / 接触器单极失效) 后,
+ *   FOC 仍按三相调制, 但实际只有两相导通, 表现为:
+ *     1. 断 A 相: I_a (ADC) 持续接近 0, I_b 和 I_c 仍有量
+ *     2. 断 B 相: I_b (ADC) 持续接近 0, I_a 和 I_c 仍有量
+ *     3. 断 C 相: 物理上 |I_a| ≈ |I_b| 反相 (双向回流), I_c (软件算 = -Ia-Ib) 接近 0
+ *
+ * 硬件采样链路 (重要):
+ *   I_a, I_b 来自 ADC 直接采样, I_c = -I_a - I_b 是软件 KCL 算出来的.
+ *   所以 (I_a + I_b + I_c) 数学上恒为 0, **不能用 KCL 判据检测缺相**.
+ *   断 C 相要靠 |I_a + I_b| 接近 0 来判断 (= |I_c| 接近 0, 等价).
+ *
+ * 时序设计 (实测调整):
+ *   早期实现用瞬时 |I| < 阈值 + 100ms 滤波, 但相电流 AC 过零时瞬时值必小,
+ *   反复跨越阈值导致拔单相时**偶发触发**(累积不到 100ms).
+ *   改用 32ms 时间常数 EMA: 健康相 EMA ≈ 整流平均 = I_peak × 2/π, 缺相 EMA 真低.
+ *
+ * 判据 (3 个 OR, 任一触发即停机):
+ *   J1 A 相低: 运行中 (|I_q_ref_filterd| > PhaseLossActiveIq) 且
+ *              |I_a|_EMA < PhaseLossLowThresh 持续 50ms
+ *   J2 B 相低: 同上, |I_b|_EMA
+ *   J3 C 相低: 同上, |I_a+I_b|_EMA (等价 |I_c|_EMA, 因 I_c 是软件 KCL 算的)
+ *
+ * 启用判据用指令侧 |I_q_ref_filterd| (而非反馈 |I_q|):
+ *   缺相场景下 PI 反复指令但电流跟不上, 反馈 |I_q| 始终接近 0 → 判据永不启用.
+ *   用指令侧能确保"想跑但跑不起来"的工况也被检测到.
+ ******************************************************************************/
+uint8_t phaseLossProFunc(void) {
+    /* EMA 状态 (函数内 static, 1ms 调一次, α=1/32 → τ ≈ 32ms) */
+    static int32_t abs_ia_ema  = 0;
+    static int32_t abs_ib_ema  = 0;
+    static int32_t abs_iab_ema = 0;
+
+    if (controller_eyou.foc_run < 1) {
+        pl_kcl_cnt = 0;
+        pl_low_a_cnt = 0;
+        pl_low_b_cnt = 0;
+        pl_low_c_cnt = 0;
+        abs_ia_ema = 0;
+        abs_ib_ema = 0;
+        abs_iab_ema = 0;
+        return 0;
+    }
+
+    int32_t ia = controller_eyou.I_a;
+    int32_t ib = controller_eyou.I_b;
+
+    int32_t ia_abs = ia < 0 ? -ia : ia;
+    int32_t ib_abs = ib < 0 ? -ib : ib;
+
+    /* I_c 在硬件上不直采, 用 |I_a + I_b| 判 C 相 (= |I_c| 软件值)
+     * 物理意义: 断 C 相时实际 I_c=0, 即 I_a+I_b=0 (双向回流) */
+    int32_t iab     = ia + ib;
+    int32_t iab_abs = iab < 0 ? -iab : iab;
+
+    /* 32ms EMA: 抑制瞬时过零导致的判据抖动 */
+    abs_ia_ema  += (ia_abs  - abs_ia_ema)  >> 5;
+    abs_ib_ema  += (ib_abs  - abs_ib_ema)  >> 5;
+    abs_iab_ema += (iab_abs - abs_iab_ema) >> 5;
+
+    /* 启用条件用指令侧 |I_q_ref_filterd| */
+    int32_t iq_cmd_abs = controller_eyou.I_q_ref_filterd < 0
+                       ? -controller_eyou.I_q_ref_filterd
+                       :  controller_eyou.I_q_ref_filterd;
+
+    uint8_t fault_triggered = 0;
+    /* EMA 已平滑, 滤波时间从 100ms 减到 50ms (响应更快) */
+    const uint16_t filter_ms = 50;
+
+    /* 仅在电机有负载运行时启用 */
+    if (iq_cmd_abs > (int32_t)Threshold.PhaseLossActiveIq) {
+        int32_t low_thresh = (int32_t)Threshold.PhaseLossLowThresh;
+
+        /* === J1: A 相低 (EMA) === */
+        if (abs_ia_ema < low_thresh) {
+            if (++pl_low_a_cnt >= filter_ms) {
+                pl_low_a_cnt = filter_ms;
+                controller_eyou.ServoErrFlag.Bit.PhaseUVolErr = 1;
+                fault_triggered = 1;
+            }
+        } else {
+            if (pl_low_a_cnt > 0) pl_low_a_cnt--;
+        }
+
+        /* === J2: B 相低 (EMA) === */
+        if (abs_ib_ema < low_thresh) {
+            if (++pl_low_b_cnt >= filter_ms) {
+                pl_low_b_cnt = filter_ms;
+                controller_eyou.ServoErrFlag.Bit.PhaseVVolErr = 1;
+                fault_triggered = 1;
+            }
+        } else {
+            if (pl_low_b_cnt > 0) pl_low_b_cnt--;
+        }
+
+        /* === J3: C 相低 (EMA, 用 |I_a+I_b|) === */
+        if (abs_iab_ema < low_thresh) {
+            if (++pl_low_c_cnt >= filter_ms) {
+                pl_low_c_cnt = filter_ms;
+                controller_eyou.ServoErrFlag.Bit.PhaseWVolErr = 1;
+                fault_triggered = 1;
+            }
+        } else {
+            if (pl_low_c_cnt > 0) pl_low_c_cnt--;
+        }
+    } else {
+        if (pl_low_a_cnt > 0) pl_low_a_cnt--;
+        if (pl_low_b_cnt > 0) pl_low_b_cnt--;
+        if (pl_low_c_cnt > 0) pl_low_c_cnt--;
+    }
+    (void)pl_kcl_cnt;   /* KCL 判据废弃 (软件算 I_c 强制 KCL 恒为 0) */
+
+    return fault_triggered;
 }
 
 /*******************************************************************************
@@ -281,6 +502,9 @@ static uint32_t get_critical_fault_mask(void) {
     mask.Bit.DriverChipNfault  = 1;  /* DRV 硬件故障 */
     mask.Bit.MosFault          = 1;  /* MOSFET 故障 */
     mask.Bit.PhaseCurrentSampleErr = 1;  /* 电流采样错 */
+    mask.Bit.PhaseUVolErr      = 1;  /* U 相缺相: 三相失衡导致剩余两相过流 */
+    mask.Bit.PhaseVVolErr      = 1;  /* V 相缺相 */
+    mask.Bit.PhaseWVolErr      = 1;  /* W 相缺相 */
     return mask.All_Flag;
 }
 

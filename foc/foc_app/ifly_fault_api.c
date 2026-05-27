@@ -23,6 +23,9 @@ Portection_Value Threshold = {
     /* 板温（对齐 motor_h7：警告 90°C, 停机 100°C） */
     .TemBorad          = 100,        /* 100°C 停机 */
     .TemBoradWarn      = 90,         /* 90°C 警告 */
+    /* 电机绕组温度 */
+    .TemMortor         = 120,        /* 120°C 停机 */
+    .TemMortorWarn     = 100,        /* 100°C 警告 */
     /* 速度（保持原值） */
     .velocity_Limit    = 4136960,
     .velocity_coe      = 1,
@@ -36,6 +39,11 @@ Portection_Value Threshold = {
     .BlockTime         = 30,
     .BlockSpeed        = 103424,
     .UVWCurrentLimit   = 46080,    // 45A Q10 (速度环限幅35A + 动态裕量)
+    /* 缺相保护阈值 */
+    .PhaseLossKclThresh = 1024,    /* 1A Q10, 三相和容差 */
+    .PhaseLossLowThresh = 307,     /* 0.3A Q10, 单相低电流判据 */
+    .PhaseLossActiveIq  = 2048,    /* 2A Q10, 启用单相低判据的最低 |Iq| */
+    .PhaseLossFilterMs  = 100,     /* 100ms 消抖 */
 };
 int8_t brake_control_flag;
 

@@ -108,6 +108,7 @@ typedef struct {
 
   uint16_t TemMortor;            //
   uint16_t TemMortorTime;        //
+  uint8_t TemMortorWarn;         //
   uint8_t TemBoradWarn;          //
   uint16_t TemBorad;             //
   uint16_t TemBoradTime;         //
@@ -119,6 +120,14 @@ typedef struct {
   int32_t PositionReach;         //
   uint16_t PositionReachTime;    //
   uint16_t UVWCurrentLimit;      // uvw
+
+  /* 缺相保护阈值 (Q10 电流单位)
+   * KCL: |Ia+Ib+Ic| > PhaseLossKclThresh 持续 PhaseLossFilterMs ms 触发
+   * 单相低: 运行中 (|Iq|>PhaseLossActiveIq) 某相 |I|<PhaseLossLowThresh 持续 ms 触发 */
+  uint16_t PhaseLossKclThresh;    /* KCL 失衡阈值, 默认 1024 (1A) */
+  uint16_t PhaseLossLowThresh;    /* 单相低电流阈值, 默认 307 (0.3A) */
+  uint16_t PhaseLossActiveIq;     /* 单相低判据启用最低 |Iq|, 默认 2048 (2A) */
+  uint16_t PhaseLossFilterMs;     /* 滤波时间 ms, 默认 100 */
 
   uint32_t Crc;                  // crc
   // uint16_t PositionCount;//

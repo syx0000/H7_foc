@@ -50,7 +50,7 @@ void set_ver_par(uint8_t id) {
   if (id == 90) {
     // motor_h7_0426 配套：pole_pairs=8，25:1减速，初始保守PID，后续再调
     NPP               = 8;
-    DEFAULT_MAX_SPEED = 110 * 25 * 1024;       // 110rpm 输出端, 给 100rpm 工作点留 10% 裕量
+    DEFAULT_MAX_SPEED = 150 * 25 * 1024;       // 110rpm 输出端, 给 100rpm 工作点留 10% 裕量
 
     INC_PID_POSITION_KP = 800;
     INC_PID_POSITION_KI = 5;

@@ -167,6 +167,11 @@ int main(void)
 	controller_eyou.FlashData.Ia_offset = (uint16_t)g_adc_offset_a;
 	controller_eyou.FlashData.Ib_offset = (uint16_t)g_adc_offset_b;
 
+	// /* 临时测试: elec_offset 修正 +40° 电角度 (前一版 -40° 反了)
+	//  * 21428 + 7282 = 28710 */
+	// controller_eyou.FlashData.elec_offset = 28710;
+	// printf("elec_offset override: %u (was 21428)\r\n", controller_eyou.FlashData.elec_offset);
+
 	/* 5. 输出端编码器零位初始化 */
 	Encoder_out_data_Reset(controller_eyou.FlashData.MaxPositionLimit,
 	                       controller_eyou.FlashData.MinPositionLimit);
@@ -243,6 +248,8 @@ int main(void)
 			/* 故障检测 */
 			dcVoltageProFunc();          // 母线过/欠压
 			boradTempProFunc();          // 板温过温
+			motorTempProFunc();          // 电机绕组过温
+			phaseLossProFunc();          // 缺相保护 (KCL + 单相低电流双判据)
 			// busOverCurrentCheck();       // 母线过流
 			// LockedRotorProFunc();        // 堵转检测
 			//driverChipFaultCheck();      // DRV8353 nFAULT 引脚

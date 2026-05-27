@@ -207,7 +207,7 @@ static void pack_status_frame(uint8_t *d) {
     /* WARN: Bit0=MOS过温警告(90°C), Bit1=电机过温警告 */
     uint8_t  warn = 0;
     if (motorProValue.board_temp >= (int8_t)Threshold.TemBoradWarn) warn |= 0x01;
-    if (motorProValue.motor_temp >= (int8_t)Threshold.TemBoradWarn) warn |= 0x02;
+    if (motorProValue.motor_temp >= (int8_t)Threshold.TemMortorWarn) warn |= 0x02;
 
     d[0] = p_int & 0xFF;
     d[1] = (p_int >> 8) & 0xFF;

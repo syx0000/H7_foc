@@ -89,6 +89,7 @@ typedef enum { FLAG_RESET = 0, FLAG_SET = 1 } flag_status;
 uint8_t CheckAndHandleAllFaultBits(void);
 int8_t dcVoltageProFunc(void);
 int8_t boradTempProFunc(void);
+int8_t motorTempProFunc(void);
 uint8_t motorProValueUpdate(void);
 void motorSpeedOffsetCheck(void);
 void motorSpeedOverCheck(void);
@@ -96,6 +97,7 @@ void motorPosOffsetCheck(void);
 void busOverCurrentCheck(void);    //
 void motorCurrentOffsetCheck(void);
 void motorOverPosCheck(void);
+uint8_t phaseLossProFunc(void);    /* 缺相保护 (1ms 慢环, KCL + 单相低 RMS 双判据) */
 uint8_t driverChipFaultCheck(void);
 int8_t getBoardTemp(void);
 int8_t getMotorTemp(void);
@@ -115,6 +117,7 @@ void drv_reset_tick_1ms(void);
 uint8_t drv_reset_is_active(void);    /* 1=DRV 复位进行中, 0=空闲 */
 /* ADC */
 int8_t TemperatureInquiry(uint16_t adc_value);
+int8_t MotorTemperatureInquiry(uint16_t adc_value);
 
 /* NTC */
 #define NTC_TABLE_SIZE 96

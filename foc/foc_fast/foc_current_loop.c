@@ -74,22 +74,87 @@ void foc_current_close_loop(ControllerStruct* controller) {
   /* CAN 0x2F05 cmd=1 触发的单频注入 (协议带宽测试), 与 sweep_signal 互斥使用一般不会同时开 */
   int16_t can_test_inject = can_wly_test_isr_pre();
 
-  // 基础电流指令先经过斜坡滤波，扫频信号后叠加，避免被滤波器吃掉
+  /* === 弱磁控制 (移到 PI 前): 用上拍 V_d/V_q 算本拍 compensation_weak ===
+   * 时序好处: 圆限幅、PI-Id AimValue、BEMF FF 都用 [N] id_weak, 完全同步
+   * Vs 信息仍是 [N-1] (V_d/V_q 上拍 PI 输出), 这是物理无法消除的测量延迟 */
+#if USE_WEAK_MAGN
+  weak_magn_control(controller);
+#endif
+
+  /* I_q_ref 流水线:
+   *   step1: iq_basic = I_q_ref (速度环输出, 不含扰动)
+   *   step2: 弱磁圆限幅基础指令 → anti-windup 触发速度环
+   *   step3: CurrentLoopSmoothRun 斜坡平滑基础指令变化率
+   *   step4: 叠加扫频 / CAN 注入信号 (避免被斜坡吃掉, 保留高频带宽)
+   *   step5: 弱磁圆限幅总电流 (保护性, 不再 anti-windup)
+   * 设计: sweep 在斜坡后叠加保留全频带, 但仍受 step5 圆限幅约束总电流不超 Imax */
+  int32_t iq_basic = controller->I_q_ref;
+
+  /* === step2: 基础指令圆限幅 + 速度环 anti-windup === */
+#if USE_WEAK_MAGN
+  int32_t iq_avail_q10 = (int32_t)controller->FlashData.MaxCurrent;
+  if (controller->compensation_weak < 0) {
+    int32_t id_abs   = -controller->compensation_weak;       /* Q10, ≥0 */
+    int32_t imax_q10 = (int32_t)controller->FlashData.MaxCurrent;
+    int64_t iq_avail_sq = (int64_t)imax_q10 * imax_q10
+                        - (int64_t)id_abs   * id_abs;
+    if (iq_avail_sq > 0) {
+      iq_avail_q10 = (int32_t)qsqrt((uint32_t)iq_avail_sq);
+      int32_t iq_before = iq_basic;
+      if (iq_basic >  iq_avail_q10) iq_basic =  iq_avail_q10;
+      if (iq_basic < -iq_avail_q10) iq_basic = -iq_avail_q10;
+      /* 圆限幅命中 → 通知速度环 anti-windup, 防止指令撤销后超速 */
+      if (iq_before != iq_basic) {
+        controller->IncPID_Speed.saturated = 1;
+      }
+    }
+  }
+#endif
+
+  /* === step3: 斜坡 (限制基础指令变化率, 不平滑扫频/CAN 注入) === */
 #if USE_CURRENT_LOOP_FILTER
-  controller->I_q_ref_filterd = CurrentLoopSmoothRun(controller->I_q_ref, &controller->CurrentSmooth) + sweep_signal + can_test_inject;
+  int32_t iq_smooth = CurrentLoopSmoothRun(iq_basic, &controller->CurrentSmooth);
 #else
-  controller->I_q_ref_filterd = controller->I_q_ref + sweep_signal + can_test_inject;
+  int32_t iq_smooth = iq_basic;
+#endif
+
+  /* === step4: 叠加扫频 / CAN 注入信号 (保留 sweep 高频成分) === */
+  controller->I_q_ref_filterd = iq_smooth + sweep_signal + can_test_inject;
+
+  /* === step5: 总电流圆限幅 (保护性, sweep 大幅注入或参数误判时兜底) ===
+   * 不触发 anti-windup: sweep 是测试扰动, 不应反作用到速度环积分 */
+#if USE_WEAK_MAGN
+  if (controller->compensation_weak < 0) {
+    if (controller->I_q_ref_filterd >  iq_avail_q10) controller->I_q_ref_filterd =  iq_avail_q10;
+    if (controller->I_q_ref_filterd < -iq_avail_q10) controller->I_q_ref_filterd = -iq_avail_q10;
+  }
 #endif
 
   /****************************辨识参数时，关闭该段，避免影响****************************************/
 
-  /* BEMF 前馈用电角速度: 对 dtheta_mech 一阶 LPF (~200Hz @10kHz, α=1/8)
-   * 抑制编码器差分量化噪声直接灌进 V_q (高速 ωe·ψ_f 项放大 1% 噪声 → 数百 mV 抖动) */
+  /* BEMF 前馈用电角速度: 来源 = 指令侧 velocity_ref_filterd (载端 rpm×1024×25)
+   * 改用指令侧而非反馈侧 dtheta_mech, 解决反向切换瞬间方向不一致问题:
+   *   - dtheta_mech 经 16 拍滑动均值 + 0.7ms LPF, 反向切换滞后 1.6~2.3ms
+   *   - I_q_ref_filterd 是指令侧 ramp, 反向时几拍内翻号
+   *   - 两者不同步 → Vd_ff/Vq_ff 短暂方向错 → PI 必须反向抵消但被限幅
+   * 指令侧 ωe 与 I_q_ref 同源 (速度环→电流环), 变向时同步翻号
+   * 跟踪误差 ≤ 5% (速度环带宽 45.7Hz), 残差由 PI 收尾完全够
+   * 仍保留 α=1/8 LPF, 抑制 velocity_ref 阶跃和速度环 ramp 高频纹波 */
 #if USE_BEMF_FF
   static float omega_e_filt = 0.0f;
+  /* 过零钳制: 电机端 |speed| < 30 rpm 时 BEMF 主项 ψ_f×ωe < 0.24V,
+   * 关掉前馈让 PI 接管, 避免低速指令抖动放大 */
+  const int32_t MOTOR_DEAD_RPM_Q10 = 30 * 1024;
   if (controller->ident_test.flux_psi > 0.0f) {
-    float omega_e_raw = (float)controller->dtheta_mech * controller->bemf_omega_e_k;
-    omega_e_filt += (omega_e_raw - omega_e_filt) * 0.125f;
+    /* velocity_ref_filterd 单位 = 电机端 rpm×1024 (与速度环 PID 同单位) */
+    int32_t v_motor_q10 = controller->velocity_ref_filterd;
+    int32_t v_abs = v_motor_q10 < 0 ? -v_motor_q10 : v_motor_q10;
+    if (v_abs < MOTOR_DEAD_RPM_Q10) {
+      omega_e_filt = 0.0f;
+    } else {
+      float omega_e_raw = (float)v_motor_q10 * controller->bemf_omega_e_k;
+      omega_e_filt += (omega_e_raw - omega_e_filt) * 0.125f;
+    }
   } else {
     omega_e_filt = 0.0f;
   }
@@ -128,18 +193,20 @@ void foc_current_close_loop(ControllerStruct* controller) {
   controller->IncPID_QAxis.PidRun(&controller->IncPID_QAxis);
   controller->V_q = controller->IncPID_QAxis.OutPut;
 
-  //弱磁
-  #if USE_WEAK_MAGN
-    weak_magn_control(controller);
-  #endif
+  /* 弱磁已在 PI 之前调用 (本拍同步), 此处不再重复调用 */
 
   #if USE_BEMF_FF
     if (controller->ident_test.flux_psi > 0.0f &&
         controller->ident_test.Lq > 0.0f) {
       /* 解耦项用指令侧电流, 避免反馈 PWM 纹波/ADC 噪声经 ωe·L 放大灌进 V_dq.
-       * Vff 用滤波后的 omega_e_filt, 跟动态 pi_lim 共用同一份, 保证两边模型一致 */
+       * Vff 用滤波后的 omega_e_filt, 跟动态 pi_lim 共用同一份, 保证两边模型一致
+       * Id 来源: 弱磁工作时用 compensation_weak, 否则用 I_d_ref (通常为 0) */
+      int32_t id_for_ff = controller->I_d_ref;
+      #if USE_WEAK_MAGN
+        if (controller->compensation_weak < 0) id_for_ff = controller->compensation_weak;
+      #endif
       float Vd_ff = -omega_e_filt * controller->ident_test.Lq * (float)controller->I_q_ref_filterd;
-      float Vq_ff =  omega_e_filt * (controller->ident_test.Ld * (float)controller->I_d_ref
+      float Vq_ff =  omega_e_filt * (controller->ident_test.Ld * (float)id_for_ff
                                      + controller->ident_test.flux_psi * 1024.0f);
 
       /* 软限幅: |Vff| ≤ 0.85·g_vs_limit, 不让前馈一项就吃光全部余量
@@ -168,10 +235,17 @@ void foc_current_close_loop(ControllerStruct* controller) {
    * OVERSPD_LOW~HIGH: 线性从 100% 削到 0%
    * >HIGH: 输出归零
    * scale 经一阶低通滤波, 避免阈值附近电压跳变产生噪音
-   * 阈值对齐 DEFAULT_MAX_SPEED=110rpm 输出端=2750rpm 电机端, 留 100rpm 裕量 */
+   * 阈值对齐: 弱磁开启时给弱磁工作区让出空间 (高 25%), 避免与弱磁削压打架 */
 #if 1
-  #define OVERSPD_LOW   (2800 * 1024)
-  #define OVERSPD_HIGH  (2950 * 1024)
+  #if USE_WEAK_MAGN
+    /* 弱磁开启: 阈值上抬, 允许超基速运行至 ~140rpm 输出端 */
+    #define OVERSPD_LOW   (3500 * 1024)
+    #define OVERSPD_HIGH  (3700 * 1024)
+  #else
+    /* 不弱磁: 阈值与 DEFAULT_MAX_SPEED=110rpm 输出端对齐, 留 100rpm 裕量 */
+    #define OVERSPD_LOW   (2800 * 1024)
+    #define OVERSPD_HIGH  (2950 * 1024)
+  #endif
   {
     static int32_t scale_filt = 1024;
     int32_t spd_abs = controller->dtheta_mech;
@@ -332,43 +406,87 @@ void deadtime_compensation_3phase(ControllerStruct* controller) {
 }
 
 /*******************************************************************************
-weak_magn_control - 弱磁控制函数
+weak_magn_control - 弱磁控制 (方案 A: 电压反馈式)
 controller - 控制器结构体指针
-作用 - 通过削弱d轴磁场提升电机极限转速
+原理:
+  1. 检测 Vs = √(V_d² + V_q²) 是否撞顶 (>95% g_vs_limit)
+  2. 撞顶则注负 Id (PI 控制), 削弱永磁磁场, 降低反电动势, 给 PI 让出电压
+  3. 余量充足时缓慢恢复 Id → 0 (退出弱磁)
+  4. 退磁保护: Id ∈ [WMAG_ID_MIN_Q10, 0]
+  5. 低速 (|ωe| < WMAG_OMEGA_E_MIN) 直接禁用, 避免噪声误触发
+时序:
+  本拍读 V_d/V_q (PI 输出, BEMF 之前) → 算出 id_weak → 下拍 PI-Id 用
+  即 PI-Id 用上一拍的 id_weak (1 拍延迟, 100µs, 远小于弱磁动态)
+ωe 来源:
+  与 BEMF FF 一致, 都用指令侧 velocity_ref_filterd / 25 (载端→电机端 Q10),
+  避免反馈侧 dtheta_mech 滞后 1.6~2.3ms 导致反向切换瞬间决策不一致
+PI 实现:
+  增量式 PI, delta = -(Kp×Δexcess + Ki×excess) / Div
+  Kp 项响应 vs 变化率, Ki 项消除稳态偏差
+注意:
+  static 状态变量必须保留, 否则每拍重置失效
+  与 BEMF FF 共存: BEMF 占 80% 电压圆, 弱磁在剩 15% 内动作
 ********************************************************************************/
 void weak_magn_control(ControllerStruct* controller){
-  static int32_t integral = 0;
-  const uint8_t filter_depth  = 32; // 滤波深度
-  float Us_buf[32]  = {0};  // Vq滤波缓存
-  uint8_t filter_idx          = 0; // 缓存索引
-  uint8_t filter_valid_cnt    = 0;
-  int32_t pid_weakmagn;
-  uint8_t Kp_weakmagn   = 3;        //弱磁PID-Kp
-  uint8_t Ki_weakmagn   = 1;        //弱磁PID-Ki
-  uint8_t Pid_div       = 100;      //弱磁PID-除频
-  int32_t integral_max = 1000000;  //弱磁PID-积分上限
-  int32_t weakmagn_max;            //弱磁深度限幅
-  controller_eyou.Us_raw = sqrt( controller->V_d *  controller->V_d +  controller->V_q *  controller->V_q);
-  controller_eyou.Us = sliding_avg_filter(Us_buf, filter_depth, &filter_idx, controller_eyou.Us_raw, filter_valid_cnt);
-  controller_eyou.voltage_error = 5*1024 - controller_eyou.Us;
-  //example:20关节速度上限设置为31rpm, 指令速度27rpm时, 27-31+5 = 1 = speed_error,此时弱磁单位为 1，弱磁深度为1*(-500)
-  controller_eyou.speed_error = (controller_eyou.velocity_ref_filterd - controller_eyou.FlashData.MaxSpeed)/25/1024 + WEAK_MAGN_MARGIN;
-    if(controller_eyou.voltage_error < 0){
-      if(controller_eyou.speed_error >= 0){
-        integral += controller_eyou.voltage_error;
-        if(integral < -integral_max) //积分限幅防止溢出
-          integral =  -integral_max;
-        pid_weakmagn = (Kp_weakmagn * controller_eyou.voltage_error + (Ki_weakmagn * integral))/Pid_div;//Kp取3, Ki取1, 结果除以100
-        weakmagn_max = WEAK_MAGN_DEPTH * controller_eyou.speed_error;
-        if(pid_weakmagn < -weakmagn_max)
-          pid_weakmagn = -weakmagn_max;
-        if(pid_weakmagn > 0)
-          pid_weakmagn = 0;
-        controller_eyou.compensation_weak = pid_weakmagn;
-      }
-      else
-        controller_eyou.compensation_weak = 0;
-    }
+  /* 持久化状态 (函数静态变量, ISR 间保留) */
+  static int32_t id_weak_q10   = 0;        /* 当前弱磁 Id 指令 Q10 */
+  static int32_t Us_filt_q10   = 0;        /* Vs 一阶低通后的值 Q10 */
+  static int32_t vs_excess_prev = 0;       /* 上一拍 vs_excess, 增量 PI 用 */
+
+  /* === 1. 计算 Vs = √(V_d² + V_q²) ===
+   * V_d/V_q 是 PI 输出, |V_dq| 受 PI OutputMax 限制 < 26000 Q10,
+   * 平方和 < 1.4e9 < 2^31, qsqrt 输入是 uint32, 直接转换无需钳幅 */
+  uint32_t vs_sq = (uint32_t)((int64_t)controller->V_d * controller->V_d
+                            + (int64_t)controller->V_q * controller->V_q);
+  int32_t Us_raw = (int32_t)qsqrt(vs_sq);    /* Q10 */
+
+  /* 一阶低通 α=1/16 (~100Hz @10kHz), 抑制 PI 输出抖动触发误判 */
+  Us_filt_q10 += (Us_raw - Us_filt_q10) >> 4;
+  controller_eyou.Us     = (uint32_t)Us_filt_q10;
+  controller_eyou.Us_raw = (uint32_t)Us_raw;
+
+  /* === 2. 低速禁用 (|ωe| < OMEGA_E_MIN) ===
+   * ωe 来源 = 指令侧 velocity_ref_filterd (电机端 rpm×1024, 与速度环 PID 同单位),
+   * 避免反馈侧 dtheta_mech 滞后导致反向切换决策不一致 */
+  int32_t v_motor_q10 = controller->velocity_ref_filterd;   /* 电机端 rpm×1024 */
+  float omega_e_abs = (float)v_motor_q10 * controller->bemf_omega_e_k;
+  if (omega_e_abs < 0.0f) omega_e_abs = -omega_e_abs;
+  if (omega_e_abs < WMAG_OMEGA_E_MIN) {
+    /* 低速时立即清零 Id (避免静止时残留弱磁导致额外铜耗) */
+    id_weak_q10    = 0;
+    vs_excess_prev = 0;
+    controller_eyou.compensation_weak = 0;
+    controller_eyou.voltage_error     = 0;
+    return;
+  }
+
+  /* === 3. 计算 Vs 触发阈值 (95% × g_vs_limit) === */
+  int32_t vs_threshold = (int32_t)g_vs_limit * WMAG_VS_TRIGGER_RATIO / 100;
+  int32_t vs_excess    = Us_filt_q10 - vs_threshold;   /* >0 撞顶, <0 有余量 */
+  controller_eyou.voltage_error = vs_excess;
+
+  /* === 4. 弱磁 PI 控制 (增量式) === */
+  if (vs_excess > 0) {
+    /* 电压撞顶 → 加大弱磁深度 (Id 更负)
+     * 增量 PI: delta = -(Kp×Δexcess + Ki×excess) / Div
+     * - Kp 项 (P): 响应 excess 变化率 (高频, 抑制冲击)
+     * - Ki 项 (I): 累积消除稳态偏差 (低频, 保证 Vs 稳到阈值) */
+    int32_t d_excess = vs_excess - vs_excess_prev;
+    int32_t delta    = -(WMAG_KP * d_excess + WMAG_KI * vs_excess) / WMAG_DIV;
+    id_weak_q10     += delta;
+  } else {
+    /* 电压有余量 → 缓慢恢复 Id 到 0 */
+    if (id_weak_q10 < -WMAG_LEAK_OUT_STEP)      id_weak_q10 += WMAG_LEAK_OUT_STEP;
+    else if (id_weak_q10 > WMAG_LEAK_OUT_STEP)  id_weak_q10 -= WMAG_LEAK_OUT_STEP;
+    else                                         id_weak_q10  = 0;
+  }
+  vs_excess_prev = vs_excess;
+
+  /* === 5. 退磁保护限幅 [ID_MIN, 0] === */
+  if (id_weak_q10 < WMAG_ID_MIN_Q10) id_weak_q10 = WMAG_ID_MIN_Q10;
+  if (id_weak_q10 > 0)               id_weak_q10 = 0;
+
+  controller_eyou.compensation_weak = id_weak_q10;
 }
 
 //滤波

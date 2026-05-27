@@ -38,6 +38,16 @@ volatile uint16_t dbgLogFlag   = 0;
 volatile uint16_t logPriodMs   = 1;
 volatile uint16_t testLogFlag  = 0;
 
+/* 方向相关相位补偿:
+ *   theta_comp = offset × 18.2 counts + dtheta × comp / 10
+ *   offset: 固定偏置 (×0.1°), dbg: offsetpos/offsetneg
+ *   comp:   速度相关 (×0.1 倍 dtheta), dbg: comppos/compneg
+ * 默认: offset=-12°/−68°(正/反转100rpm调好), comp=0(预留) */
+int16_t g_theta_offset_pos = 0;//-120;   /* -12.0° */
+int16_t g_theta_offset_neg = 0;//-680;   /* -68.0° */
+int16_t g_theta_comp_pos = 23;
+int16_t g_theta_comp_neg = 23;
+
 extern ifly_Err_Pro_Type motorProValue;
 extern ErrMessgeStruct ErrMessge[ERRMESSGECOUNT];
 
@@ -443,6 +453,40 @@ void dbg_cmd_set(void) {
         token = strtok(loc, "canrxdbg");
         g_can_rx_debug = (uint8_t)atoi((char *)token);
         printf("CAN RX debug: %s\r\n", g_can_rx_debug ? "ON" : "OFF");
+    }
+
+    /* offsetpos<N>: 设置正转固定角度偏置 (单位 ×0.1°, 例 400=40°) */
+    if (NULL != strstr((char *)dbgRecvBuf, "offsetpos")) {
+        loc = strstr((char *)dbgRecvBuf, "offsetpos");
+        token = strtok(loc, "offsetpos");
+        g_theta_offset_pos = (int16_t)atoi((char *)token);
+        printf("offset_pos=%d (×0.1°) = %.1f deg\r\n",
+               g_theta_offset_pos, g_theta_offset_pos * 0.1f);
+    }
+
+    /* offsetneg<N>: 设置反转固定角度偏置 (单位 ×0.1°) */
+    if (NULL != strstr((char *)dbgRecvBuf, "offsetneg")) {
+        loc = strstr((char *)dbgRecvBuf, "offsetneg");
+        token = strtok(loc, "offsetneg");
+        g_theta_offset_neg = (int16_t)atoi((char *)token);
+        printf("offset_neg=%d (×0.1°) = %.1f deg\r\n",
+               g_theta_offset_neg, g_theta_offset_neg * 0.1f);
+    }
+
+    /* comppos<N>: 正转速度相关补偿系数 (×0.1 倍 dtheta) */
+    if (NULL != strstr((char *)dbgRecvBuf, "comppos")) {
+        loc = strstr((char *)dbgRecvBuf, "comppos");
+        token = strtok(loc, "comppos");
+        g_theta_comp_pos = (int16_t)atoi((char *)token);
+        printf("comp_pos=%d (×0.1)\r\n", g_theta_comp_pos);
+    }
+
+    /* compneg<N>: 反转速度相关补偿系数 (×0.1 倍 dtheta) */
+    if (NULL != strstr((char *)dbgRecvBuf, "compneg")) {
+        loc = strstr((char *)dbgRecvBuf, "compneg");
+        token = strtok(loc, "compneg");
+        g_theta_comp_neg = (int16_t)atoi((char *)token);
+        printf("comp_neg=%d (×0.1)\r\n", g_theta_comp_neg);
     }
 
     /* canstat: 打印 FDCAN 状态 + 重置 TX FIFO (恢复 Bus-Off / FIFO 卡死) */
@@ -942,7 +986,8 @@ void dbg_log_print(void) {
 
         ControllerStruct *c = &controller_eyou;
 
-        /* 速度: 内部 velocity_ref 单位 = rpm × 1024 × 25 (load端), dtheta_mech 单位 = rpm × 1024 (电机端) */
+        /* 速度: velocity_ref/velocity_ref_filterd 单位 = 电机端 rpm × 1024, dtheta_mech 同单位
+         * 打印转换为 load 端 0.01rpm: velocity_ref / (25 * 1024 / 100) */
         int32_t spd_ref_load_x100   = c->velocity_ref         / (25 * 1024 / 100);  /* 0.01 rpm load端 */
         int32_t spd_filt_load_x100  = c->velocity_ref_filterd / (25 * 1024 / 100);
         int32_t spd_mech_motor_x100 = c->dtheta_mech          / (1024 / 100);       /* 0.01 rpm 电机端 */
@@ -1020,6 +1065,19 @@ void dbg_log_print(void) {
                (unsigned long)c->Ia_raw, (unsigned long)c->Ib_raw,
                (unsigned)c->FlashData.Ia_offset, (unsigned)c->FlashData.Ib_offset,
                (long)c->theta_elec, (unsigned)c->FlashData.PhaseOrder);
+
+        /* 行 4b: 弱磁状态 (USE_WEAK_MAGN=1 时有效, 关闭时全 0)
+         *   id_weak  = Id 弱磁指令 (Q10, ≤0)
+         *   Us_filt  = √(Vd²+Vq²) 一阶低通后 (Q10), 触发线 = 95% × Vlim
+         *   vs_excess = Us_filt - 触发线 (>0 撞顶, <0 有余量)
+         *   triggered = 1 表示当前在弱磁工作区 */
+        int wmag_active = (c->compensation_weak < 0) ? 1 : 0;
+        printf("[L200/4b] WMAG=%d id_weak=%ld(Q10) Us_filt=%lu(Q10) vs_excess=%ld trig=%d\r\n",
+               USE_WEAK_MAGN,
+               (long)c->compensation_weak,
+               (unsigned long)c->Us,
+               (long)c->voltage_error,
+               wmag_active);
 
         /* 行5: PWM CCR + 双环斜坡 (区分饱和原因)
          *   ccr 接近 PWM_T 或 0 => SVPWM 撞调制极限
