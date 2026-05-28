@@ -287,6 +287,7 @@ typedef struct {
   float    abort_freq;          // 中止瞬间的扫频频率 (Hz)
   // 测试期间临时修改的阈值, 用于结束时还原
   uint8_t  saved_velocity_coe;
+  uint16_t saved_phase_loss_iq; // 缺相保护启用阈值 (Q10)
 } SpeedLoopBWTest;
 
 /*******************************************************************************

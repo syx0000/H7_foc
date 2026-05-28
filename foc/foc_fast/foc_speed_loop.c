@@ -432,5 +432,12 @@ void spd_bw_test_print_results(SpeedLoopBWTest* test) {
     printf("velocity_coe restored to %u\r\n", (unsigned)Threshold.velocity_coe);
   }
 
+  // 还原缺相保护启用阈值
+  if (test->saved_phase_loss_iq != 0) {
+    Threshold.PhaseLossActiveIq = test->saved_phase_loss_iq;
+    test->saved_phase_loss_iq = 0;
+    printf("PhaseLossActiveIq restored to %u\r\n", (unsigned)Threshold.PhaseLossActiveIq);
+  }
+
   printf("=============================================\r\n");
 }

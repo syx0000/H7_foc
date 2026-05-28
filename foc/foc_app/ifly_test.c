@@ -112,6 +112,9 @@ void TestSpeedLoopBandwidth(void) {
   controller_eyou.spd_bw_test.saved_velocity_coe = Threshold.velocity_coe;
   Threshold.velocity_coe = 100;  // 临时放宽速度偏差保护
 
+  controller_eyou.spd_bw_test.saved_phase_loss_iq = Threshold.PhaseLossActiveIq;
+  Threshold.PhaseLossActiveIq = 65535;  // 临时关闭缺相保护 (启用阈值拉到最大)
+
   printf("Speed BW test started: 1-200Hz, 2rpm inject, bias 10rpm\r\n");
 }
 
