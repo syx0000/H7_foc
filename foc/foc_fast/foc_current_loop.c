@@ -240,9 +240,10 @@ void foc_current_close_loop(ControllerStruct* controller) {
    * 阈值对齐: 弱磁开启时给弱磁工作区让出空间 (高 25%), 避免与弱磁削压打架 */
 #if 1
   #if USE_WEAK_MAGN
-    /* 弱磁开启: 阈值上抬, 允许超基速运行至 ~140rpm 输出端 */
-    #define OVERSPD_LOW   (3500 * 1024)
-    #define OVERSPD_HIGH  (3700 * 1024)
+    /* 弱磁开启: 阈值上抬, 允许超基速运行至 ~140rpm 输出端
+     * 注意: 与弱磁削压有冗余, 主要给 OVERSPD 兜底, 让弱磁先工作 */
+    #define OVERSPD_LOW   (3800 * 1024)
+    #define OVERSPD_HIGH  (4000 * 1024)
   #else
     /* 不弱磁: 阈值与 DEFAULT_MAX_SPEED=110rpm 输出端对齐, 留 100rpm 裕量 */
     #define OVERSPD_LOW   (2800 * 1024)

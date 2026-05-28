@@ -163,8 +163,14 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
   - **FF 输出软限幅** |Vff| ≤ 0.85·g_vs_limit，给 PI 至少 15% 矢量预算
   - **动态 PI OutputMax**: 矢量预算 = g_vs_limit - |Vff_pred| - 死区，含 ωe·Ld·Id 项（不再只算 ψ_f）
   - 参数来源: Flash 辨识值 (Rs/Ld/Lq/ψ_f)
-- **速度环电流限幅**: `INC_PID_SPEED_LIMIT = 10A`（Q10 = 10240）
-- **速度环斜坡**: `MIN_ACC_TIME = 400ms`（加速度 250 rpm/s，对齐梯形规划）
+- **弱磁控制 (方案A 电压反馈式)**: `USE_WEAK_MAGN = 1`
+  - `WMAG_VS_TRIGGER_RATIO = 90`（Vs > 90%·g_vs_limit 才介入，留 BEMF FF 先消化）
+  - `WMAG_ID_MIN_Q10 = -6144`（最深 -6A，额定 ~15A 的 40%，退磁安全线内）
+  - `WMAG_LEAK_OUT_STEP = 8`（退磁衰减 ~78A/s，与弱磁 PI 带宽 ~1.6Hz 匹配，避免极限环）
+  - 撞顶削 BEMF 让出电压余量，T-N 曲线 dropoff 点从 ~95rpm 推到 ~115rpm 输出端
+- **超速削压**: `OVERSPD_LOW/HIGH = 3800/4000` rpm 电机端（弱磁开启路径），高于弱磁阈值给兜底
+- **速度环电流限幅**: `INC_PID_SPEED_LIMIT = DEFAULT_MAX_CURRENT = 90A`（Q10 = 92160）
+- **速度环斜坡**: `MIN_ACC_TIME = 800ms`（加速度 ~137 rpm/s 输出端，对齐梯形规划 200）
 - **位置环梯形规划**: `POS_TRAPEZOID_DEFAULT_AMAX_RPS = 200 rpm/s`
 
 ## 硬件配置

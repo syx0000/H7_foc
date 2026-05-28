@@ -46,7 +46,7 @@ extern volatile uint8_t USART_CONTROL;
  * 高速时给电流环提供电压基准, 减小 PI 输出, 留电压裕量, 降低过调制概率 */
 /* ωe 来源 = 指令侧 velocity_ref_filterd (与 I_q_ref 同源, 反向同步翻号)
  * 低速 < 30rpm 电机端时强制清零, 让 PI 接管 */
-#define USE_BEMF_FF 0     // 反电动势前馈使能: 1=开, 0=关
+#define USE_BEMF_FF 1     // 反电动势前馈使能: 1=开, 0=关
 
 /*速度环陷波滤波器 (消除减速箱机械谐振) */
 #define USE_SPEED_NOTCH 0         // 速度反馈陷波使能: 1=开, 0=关
@@ -61,12 +61,12 @@ extern volatile uint8_t USART_CONTROL;
  * Kp/Ki/Div: 弱磁 PI 增益, 比电流环慢 10× (动态可接受)
  * LEAK_OUT: 退出衰减步进 0.03A/100µs ≈ 300A/s, 速度回落时快速复位 Id
  * OMEGA_E_MIN: 启用阈值, 低速时 Vs 不可能撞顶, 直接禁用避免噪声触发 */
-#define WMAG_VS_TRIGGER_RATIO 70          // % of g_vs_limit (70% ≈ 100rpm 输出端触发)
-#define WMAG_ID_MIN_Q10       (-3072)     // -3A Q10 (退磁安全线)
+#define WMAG_VS_TRIGGER_RATIO 90          // % of g_vs_limit (90%, 留 BEMF FF 先消化)
+#define WMAG_ID_MIN_Q10       (-6144)     // -6A Q10 (额定~15A 的 40%, 退磁安全线内)
 #define WMAG_KP               4
 #define WMAG_KI               1
 #define WMAG_DIV              100
-#define WMAG_LEAK_OUT_STEP    32          // 0.03A/100µs (Q10)
+#define WMAG_LEAK_OUT_STEP    8           // 0.0078A/100µs ≈ 78A/s (与弱磁 PI 带宽 ~1.6Hz 匹配)
 #define WMAG_OMEGA_E_MIN      100.0f      // 启用阈值 rad/s (≈5rpm 输出端)
 
 /*死区补偿功能配置*/

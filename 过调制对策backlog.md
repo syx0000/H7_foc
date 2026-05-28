@@ -1,16 +1,18 @@
 # 过调制 / 空载跑飞对策 Backlog
 
-## 状态总览（截至 2026-05-14）
+## 状态总览（截至 2026-05-28）
 
-第一阶段全部落地，编译通过 0 Error 0 Warning，待烧录实测验证。
+第一阶段全部落地，编译通过 0 Error 0 Warning，T-N 曲线验证完成（高速段无振荡）。
 
 | 优先级 | 方案 | 状态 |
 |--------|------|------|
-| P0-1 | 速度环 `MIN_ACC_TIME` 200→400ms | ✅ 已改 |
-| P1-3 | `INC_PID_SPEED_LIMIT` 25A→10A | ✅ 已改 |
+| P0-1 | 速度环 `MIN_ACC_TIME` 200→800ms | ✅ 已改 |
+| P1-3 | `INC_PID_SPEED_LIMIT` → DEFAULT_MAX_CURRENT (90A) | ✅ 已改 |
 | P1-2 | I_q_ref 直写路径限幅（CAN+串口）| ✅ 已加 |
 | P0-2 | 速度环 PI 抗饱和 | ✅ 评估后跳过：IncPIDCal 输出钳位即天然抗饱和 |
 | P0-3 | 反电动势前馈（BEMF FF）| ✅ 已加（`USE_BEMF_FF=1` 默认开）|
+| P0-4 | 弱磁触发阈值 70%→90% + 退磁限 -3A→-6A + LEAK 32→8 | ✅ 已改（T-N 曲线 dropoff +20rpm）|
+| P0-5 | 弱磁路径 OVERSPD 3500/3700→3800/4000 rpm | ✅ 已改（兜底，让弱磁先工作）|
 | P1-1 | 母线电压联动限流 | ⏸️ 待做 |
 | P0-2b | 位置环 PositionPID 抗饱和 | ⏸️ 按需 |
 | P3 | 过调制 SVPWM | ❌ 不做（48V 母线 + 100rpm 工况无需，反电动势仅 20V 占用）|
@@ -21,8 +23,9 @@
 |------|------|------|
 | 反电动势前馈 | ✅ **已实现** | `foc_current_loop.c` 电流 PI 后, `limit_norm` 前 |
 | PI 抗饱和（速度环+电流环）| ✅ **天然抗饱和** | `IncPIDCal` 增量式 PID 自带 OutPut 钳位 |
-| 速度环斜坡 | ✅ 已启用 `USE_SPEED_LOOP_SMOOTH=1` | `MIN_ACC_TIME=400ms`（加速度 250 rpm/s）|
-| 电流指令限幅 | ✅ 三层都有 | 速度环 `INC_PID_SPEED_LIMIT=10A` + CAN/串口直写路径都加了钳位 |
+| 速度环斜坡 | ✅ 已启用 `USE_SPEED_LOOP_SMOOTH=1` | `MIN_ACC_TIME=800ms`（加速度 ~137 rpm/s 输出端）|
+| 电流指令限幅 | ✅ 三层都有 | 速度环 `INC_PID_SPEED_LIMIT=DEFAULT_MAX_CURRENT(90A)` + CAN/串口直写路径都加了钳位 |
+| 弱磁控制 | ✅ 方案A 电压反馈式 | `WMAG_VS_TRIGGER_RATIO=90`, `ID_MIN=-6A`, `LEAK_OUT=8`（~78A/s）|
 | 母线电压联动限流 | ❌ 未实现 | VDC 已采样但只用于 OVP/UVP |
 | 位置环 PositionPID 抗饱和 | ⚠️ 部分 | `pidI` 输出贡献钳位 ±20000，但 `iError` 累加无限制 |
 | 过调制 SVPWM | ❌ 未实现（不需要）| 标准 SVPWM，圆形限幅到 V_dc/√3 ≈ 27.7V |
