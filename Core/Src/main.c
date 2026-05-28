@@ -150,7 +150,7 @@ int main(void)
 	printf("Calibrating ADC offsets...\r\n");
 	HAL_Delay(100);  // 等待ADC稳定
 	ADC_CalibrateOffsets(1024);
-	printf("ADC calibration done: Off_a=%ld Off_b=%ld\r\n",
+	printf("ADC calibration done: Off_a=%d Off_b=%d\r\n",
 	       (int32_t)g_adc_offset_a, (int32_t)g_adc_offset_b);
 
 	/* FOC控制器初始化（参考PHU Init_func顺序） */
@@ -186,8 +186,8 @@ int main(void)
 	HAL_Delay(10);
 	/* VDC: ADC 16bit, 3.3V 满量程, 分压比需根据硬件确认 */
 	float vdc_volt = g_vdc_raw * 3.3f / 65535.0f;
-	printf("VDC ADC raw = %lu, voltage (before divider scaling) = %.3f V\r\n",
-	       g_vdc_raw, vdc_volt);
+	printf("VDC ADC raw = %u, voltage (before divider scaling) = %.3f V\r\n",
+	       (unsigned int)g_vdc_raw, vdc_volt);
 
 //	/* Rs 辨识前先对齐 d 轴，消除上电编码器位置不确定 */
 //	alignDAxis(&controller_eyou);

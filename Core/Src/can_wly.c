@@ -44,9 +44,11 @@ static uint32_t s_tx_fail_count = 0;
 
 /* CAN 超时保护：收到有效帧时重置，1ms 递减，归零停机 */
 #define CAN_TIMEOUT_MS 200
+#define MIT_TIMEOUT_MS 20
 static volatile uint16_t s_can_timeout_cnt = 0;
+static volatile uint16_t s_mit_timeout_cnt = 0;
 static uint8_t s_can_timeout_enabled = 0;
-uint8_t g_can_timeout_force_disable = 0;  /* CAN 超时保护已启用 */
+uint8_t g_can_timeout_force_disable = 1;  /* CAN 超时保护已启用 */
 
 /* ========== 访问全局控制器 ========== */
 extern ControllerStruct controller_eyou;
@@ -258,9 +260,8 @@ static void send_ext_status_frame(void) {
     if (iq_abs < 0) iq_abs = -iq_abs;
     uint16_t i_rms_100 = (uint16_t)((iq_abs * 100) / 1024);
 
-    /* 速度: dtheta_mech_out (电机端 rpm×1024, 经减速比 25 折算到电机端) → 0.1 输出端 rpm
-     * 协议要的是输出端 rpm × 10, 所以再除以减速比 25 */
-    int16_t v_int = (int16_t)((controller_eyou.dtheta_mech_out * 10) / (1024 * 25));
+    /* 速度: dtheta_mech_out (输出端 rpm×1024) → 0.1 输出端 rpm */
+    int16_t v_int = (int16_t)((controller_eyou.dtheta_mech_out * 10) / 1024);
 
     /* 位置: real_position_out (1°/1024) → 0.001° */
     int32_t p_int = (int32_t)(((int64_t)controller_eyou.real_position_out * 1000) / 1024);
@@ -369,13 +370,24 @@ static void handle_mit_cmd(const uint8_t *data, uint32_t len) {
     uint16_t kp_raw = (uint16_t)data[off + 7] | ((uint16_t)data[off + 8] << 8);
     uint16_t kd_raw = (uint16_t)data[off + 9] | ((uint16_t)data[off + 10] << 8);
 
-    controller_eyou.mit_p_des = uint_to_float(p_raw, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
-    controller_eyou.mit_v_des = uint_to_float(v_raw, g_can_wly_lim.spd_min, g_can_wly_lim.spd_max, 16);
-    controller_eyou.mit_t_ff  = can_wly_Nm_to_iA(uint_to_float(t_raw, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16));
-    controller_eyou.mit_kp    = uint_to_float(kp_raw, g_can_wly_lim.kp_min, g_can_wly_lim.kp_max, 16);
-    controller_eyou.mit_kd    = uint_to_float(kd_raw, g_can_wly_lim.kd_min, g_can_wly_lim.kd_max, 16);
+    float p_des = uint_to_float(p_raw, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
+    float v_des = uint_to_float(v_raw, g_can_wly_lim.spd_min, g_can_wly_lim.spd_max, 16);
+    float t_ff  = can_wly_Nm_to_iA(uint_to_float(t_raw, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16));
+    float kp    = uint_to_float(kp_raw, g_can_wly_lim.kp_min, g_can_wly_lim.kp_max, 16);
+    float kd    = uint_to_float(kd_raw, g_can_wly_lim.kd_min, g_can_wly_lim.kd_max, 16);
 
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    controller_eyou.mit_p_des = p_des;
+    controller_eyou.mit_v_des = v_des;
+    controller_eyou.mit_t_ff  = t_ff;
+    controller_eyou.mit_kp    = kp;
+    controller_eyou.mit_kd    = kd;
     controller_eyou.controller_mode = MIT_PD_MODE;
+    s_mit_timeout_cnt = MIT_TIMEOUT_MS;
+    if (primask == 0U) {
+        __enable_irq();
+    }
     send_status_frame();
 }
 
@@ -724,6 +736,17 @@ void can_wly_tick_1ms(void) {
 
     if (s_can_timeout_enabled && !g_can_timeout_force_disable && s_can_timeout_cnt > 0) {
         if (--s_can_timeout_cnt == 0) {
+            controller_eyou.ServoErrFlag.Bit.CommunicateErr = 1;
+        }
+    }
+
+    if (!g_can_timeout_force_disable &&
+        controller_eyou.controller_mode == MIT_PD_MODE &&
+        s_mit_timeout_cnt > 0) {
+        if (--s_mit_timeout_cnt == 0) {
+            controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
+            controller_eyou.I_q_ref = 0;
+            controller_eyou.I_d_ref = 0;
             controller_eyou.ServoErrFlag.Bit.CommunicateErr = 1;
         }
     }

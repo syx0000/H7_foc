@@ -684,8 +684,8 @@ void dbg_cmd_set(void) {
                            0x01};               /* CANID     = 1 */
             printf("  [RX] ID=0x500 MIT 12B: p=mid, v=mid, t=mid, Kp=0x4000, Kd=0x4000\r\n");
             fdcan_rx_user(0x500, d, 12);
-            printf("  mit_p_des=%.4f rad, mit_v_des=%.4f rad/s, mit_t_ff=%d (Q10 A)\r\n",
-                   controller_eyou.mit_p_des, controller_eyou.mit_v_des, (int)controller_eyou.mit_t_ff);
+            printf("  mit_p_des=%.4f rad, mit_v_des=%.4f rad/s, mit_t_ff=%.3f A\r\n",
+                   controller_eyou.mit_p_des, controller_eyou.mit_v_des, controller_eyou.mit_t_ff);
             printf("  mit_kp=%.2f, mit_kd=%.2f\r\n",
                    controller_eyou.mit_kp, controller_eyou.mit_kd);
             printf("  mode=%d (expect %d=MIT_PD_MODE)\r\n",
@@ -729,7 +729,7 @@ void dbg_cmd_set(void) {
                            0x00, 0xC0,          /* VEL = +10 rad/s (75% 量程) */
                            0x00, 0x80,          /* T = 0 */
                            0x99, 0x19,          /* Kp = 50 (10% 量程) */
-                           0x33, 0x0C,          /* Kd = 3.8 (19% 量程) */
+                           0xA3, 0x30,          /* Kd = 3.8 (19% 量程, 0x30A3) */
                            0x01};
             printf("  [RX] ID=0x500 MIT: p=+3.5rad, v=+10rad/s, t=0, Kp=50, Kd=3.8\r\n");
             fdcan_rx_user(0x500, d, 12);
@@ -745,7 +745,7 @@ void dbg_cmd_set(void) {
                            0x00, 0x40,          /* VEL = -10 rad/s (25% 量程) */
                            0x00, 0x80,          /* T = 0 */
                            0x99, 0x19,          /* Kp = 50 */
-                           0x33, 0x0C,          /* Kd = 3.8 */
+                           0xA3, 0x30,          /* Kd = 3.8 (0x30A3) */
                            0x01};
             printf("  [RX] ID=0x500 MIT: p=-3.5rad, v=-10rad/s, t=0, Kp=50, Kd=3.8\r\n");
             fdcan_rx_user(0x500, d, 12);
@@ -765,8 +765,8 @@ void dbg_cmd_set(void) {
                            0x01};
             printf("  [RX] ID=0x500 MIT: p=0, v=0, t=+500Nm(MAX), Kp=0, Kd=0\r\n");
             fdcan_rx_user(0x500, d, 12);
-            printf("  mit_t_ff=%d (Q10 A, expect large positive)\r\n",
-                   (int)controller_eyou.mit_t_ff);
+            printf("  mit_t_ff=%.3f A (expect ~168, LUT 100A->260Nm 之外线性外推)\r\n",
+                   controller_eyou.mit_t_ff);
             printf("  mit_kp=%.2f, mit_kd=%.2f (both expect 0.00)\r\n",
                    controller_eyou.mit_kp, controller_eyou.mit_kd);
             break;
@@ -781,8 +781,8 @@ void dbg_cmd_set(void) {
                            0x01};
             printf("  [RX] ID=0x500 MIT: p=0, v=0, t=-500Nm(MIN), Kp=0, Kd=0\r\n");
             fdcan_rx_user(0x500, d, 12);
-            printf("  mit_t_ff=%d (Q10 A, expect large negative)\r\n",
-                   (int)controller_eyou.mit_t_ff);
+            printf("  mit_t_ff=%.3f A (expect ~-168, LUT 外推下限)\r\n",
+                   controller_eyou.mit_t_ff);
             break;
         }
         case 15: {
@@ -790,8 +790,8 @@ void dbg_cmd_set(void) {
             uint8_t d[] = {0xFF, 0xFF, 0xFF,   /* POS = +7 rad (最大) */
                            0x00, 0x80,
                            0x00, 0x80,
-                           0x00, 0x20,          /* Kp = 125 (25% 量程) */
-                           0x99, 0x19,          /* Kd = 10 (50% 量程) */
+                           0x00, 0x40,          /* Kp = 125 (25% 量程, 0x4000) */
+                           0x00, 0x80,          /* Kd = 10 (50% 量程, 0x8000) */
                            0x01};
             printf("  [RX] ID=0x500 MIT: p=+7rad(MAX), v=0, t=0, Kp=125, Kd=10\r\n");
             fdcan_rx_user(0x500, d, 12);
@@ -805,8 +805,8 @@ void dbg_cmd_set(void) {
             uint8_t d[] = {0x00, 0x00, 0x00,   /* POS = -7 rad (最小) */
                            0x00, 0x80,
                            0x00, 0x80,
-                           0x00, 0x20,          /* Kp = 125 */
-                           0x99, 0x19,          /* Kd = 10 */
+                           0x00, 0x40,          /* Kp = 125 (0x4000) */
+                           0x00, 0x80,          /* Kd = 10 (0x8000) */
                            0x01};
             printf("  [RX] ID=0x500 MIT: p=-7rad(MIN), v=0, t=0, Kp=125, Kd=10\r\n");
             fdcan_rx_user(0x500, d, 12);
@@ -820,7 +820,7 @@ void dbg_cmd_set(void) {
             uint8_t d[] = {0x00, 0x00, 0x80,
                            0xFF, 0xFF,          /* VEL = +20 rad/s (最大) */
                            0x00, 0x80,
-                           0x00, 0x10,          /* Kp = 62.5 */
+                           0x00, 0x20,          /* Kp = 62.5 (0x2000) */
                            0xFF, 0xFF,          /* Kd = 20 (最大) */
                            0x01};
             printf("  [RX] ID=0x500 MIT: p=0, v=+20rad/s(MAX), t=0, Kp=62.5, Kd=20\r\n");
@@ -834,7 +834,7 @@ void dbg_cmd_set(void) {
             uint8_t d[] = {0x00, 0x00, 0x80,
                            0x00, 0x00,          /* VEL = -20 rad/s (最小) */
                            0x00, 0x80,
-                           0x00, 0x10,          /* Kp = 62.5 */
+                           0x00, 0x20,          /* Kp = 62.5 (0x2000) */
                            0xFF, 0xFF,          /* Kd = 20 */
                            0x01};
             printf("  [RX] ID=0x500 MIT: p=0, v=-20rad/s(MIN), t=0, Kp=62.5, Kd=20\r\n");
@@ -847,13 +847,13 @@ void dbg_cmd_set(void) {
             /* MIT 测试 - 典型阻抗控制参数 (Kp=100, Kd=5, 小扭矩偏置) */
             uint8_t d[] = {0x00, 0x00, 0x80,   /* POS = 0 */
                            0x00, 0x80,          /* VEL = 0 */
-                           0x66, 0x86,          /* T = +10 N·m (52% 量程) */
+                           0x8F, 0x82,          /* T = +10 N·m (52% 量程, 0x828F) */
                            0x33, 0x33,          /* Kp = 100 (20% 量程) */
-                           0x00, 0x20,          /* Kd = 5 (25% 量程) */
+                           0x00, 0x40,          /* Kd = 5 (25% 量程, 0x4000) */
                            0x01};
             printf("  [RX] ID=0x500 MIT: p=0, v=0, t=+10Nm, Kp=100, Kd=5 (typical impedance)\r\n");
             fdcan_rx_user(0x500, d, 12);
-            printf("  mit_t_ff=%d (Q10 A)\r\n", (int)controller_eyou.mit_t_ff);
+            printf("  mit_t_ff=%.3f A\r\n", controller_eyou.mit_t_ff);
             printf("  mit_kp=%.2f (expect ~100), mit_kd=%.2f (expect ~5)\r\n",
                    controller_eyou.mit_kp, controller_eyou.mit_kd);
             break;
@@ -864,6 +864,140 @@ void dbg_cmd_set(void) {
         }
         g_cantest_stub = 0;
         printf("=== cantest%d done ===\r\n", tc);
+    }
+
+    /* mit<N>: MIT 模式实测序列 (0x500 CAN-FD 帧, 需主站 ≤10ms 重发)
+     * 用法: 串口发 "mit0" ~ "mit7" 模拟 Step 0~7, 每步持续 100ms 后自动退出
+     * Step 0: 安全态准备 (失能→清错→置零→使能)
+     * Step 1~7: MIT 指令 (切模式/位置保持/阶跃/提刚度/速度跟随/转矩前馈) */
+    if (NULL != strstr((char *)dbgRecvBuf, "mit")) {
+        loc = strstr((char *)dbgRecvBuf, "mit");
+        token = strtok(loc, "mit");
+        int step = atoi((char *)token);
+        printf("=== mit%d ===\r\n", step);
+        g_cantest_stub = 1;
+
+        switch (step) {
+        case 0: {
+            /* Step 0: 安全态准备 (0x701 经典 CAN, 每帧间隔 20ms) */
+            uint8_t d_disable[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFB};
+            uint8_t d_clear[]   = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD};
+            uint8_t d_zero[]    = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC};
+            uint8_t d_enable[]  = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFA};
+
+            printf("  [0.1] 失能\r\n");
+            fdcan_rx_user(0x701, d_disable, 8);
+            HAL_Delay(20);
+
+            printf("  [0.2] 清错\r\n");
+            fdcan_rx_user(0x701, d_clear, 8);
+            HAL_Delay(20);
+
+            printf("  [0.3] 置零 (当前位置对齐 0 rad)\r\n");
+            fdcan_rx_user(0x701, d_zero, 8);
+            HAL_Delay(20);
+
+            printf("  [0.4] 使能\r\n");
+            fdcan_rx_user(0x701, d_enable, 8);
+            printf("  foc_run=%d (expect 2)\r\n", controller_eyou.foc_run);
+            break;
+        }
+        case 1: {
+            /* Step 1: 切模式不动作 (p=0, v=0, t=0, Kp=0, Kd=0) */
+            uint8_t d[] = {0xFF, 0xFF, 0x7F, 0xFF, 0x7F, 0xFF, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x01};
+            printf("  [RX] ID=0x500 DLC=12 (p=0, v=0, t=0, Kp=0, Kd=0)\r\n");
+            for (int i = 0; i < 10; i++) {
+                fdcan_rx_user(0x500, d, 12);
+                HAL_Delay(10);
+            }
+            printf("  mode=%d (expect %d=MIT_PD_MODE)\r\n",
+                   controller_eyou.controller_mode, MIT_PD_MODE);
+            printf("  I_q=%d (expect ~0)\r\n", controller_eyou.I_q);
+            break;
+        }
+        case 2: {
+            /* Step 2: 位置保持 (p=0, v=0, t=0, Kp=10, Kd=1) */
+            uint8_t d[] = {0xFF, 0xFF, 0x7F, 0xFF, 0x7F, 0xFF, 0x7F, 0x1E, 0x05, 0xCC, 0x0C, 0x01};
+            printf("  [RX] ID=0x500 DLC=12 (p=0, Kp=10, Kd=1)\r\n");
+            printf("  手扭输出端应有回弹力，松手回 0 位 ±0.5°\r\n");
+            for (int i = 0; i < 10; i++) {
+                fdcan_rx_user(0x500, d, 12);
+                HAL_Delay(10);
+            }
+            printf("  mit_kp=%.2f, mit_kd=%.2f\r\n",
+                   controller_eyou.mit_kp, controller_eyou.mit_kd);
+            break;
+        }
+        case 3: {
+            /* Step 3: 阶跃 +5° (p=+0.0873 rad, Kp=10, Kd=1) */
+            uint8_t d[] = {0xB2, 0x9A, 0x81, 0xFF, 0x7F, 0xFF, 0x7F, 0x1E, 0x05, 0xCC, 0x0C, 0x01};
+            printf("  [RX] ID=0x500 DLC=12 (p=+0.0873 rad = +5°, Kp=10, Kd=1)\r\n");
+            printf("  输出端应转 +5°，超调 ≤20%%，稳态误差 ≤0.5°\r\n");
+            for (int i = 0; i < 10; i++) {
+                fdcan_rx_user(0x500, d, 12);
+                HAL_Delay(10);
+            }
+            printf("  mit_p_des=%.4f rad (expect 0.0873)\r\n", controller_eyou.mit_p_des);
+            break;
+        }
+        case 4: {
+            /* Step 4: 阶跃 −5° (p=−0.0873 rad, Kp=10, Kd=1) */
+            uint8_t d[] = {0x4C, 0x65, 0x7E, 0xFF, 0x7F, 0xFF, 0x7F, 0x1E, 0x05, 0xCC, 0x0C, 0x01};
+            printf("  [RX] ID=0x500 DLC=12 (p=−0.0873 rad = −5°, Kp=10, Kd=1)\r\n");
+            printf("  输出端应转 −5°\r\n");
+            for (int i = 0; i < 10; i++) {
+                fdcan_rx_user(0x500, d, 12);
+                HAL_Delay(10);
+            }
+            printf("  mit_p_des=%.4f rad (expect -0.0873)\r\n", controller_eyou.mit_p_des);
+            break;
+        }
+        case 5: {
+            /* Step 5: 提刚度 +5° (p=+0.0873 rad, Kp=50, Kd=2) */
+            uint8_t d[] = {0xB2, 0x9A, 0x81, 0xFF, 0x7F, 0xFF, 0x7F, 0x99, 0x19, 0x99, 0x19, 0x01};
+            printf("  [RX] ID=0x500 DLC=12 (p=+0.0873 rad, Kp=50, Kd=2)\r\n");
+            printf("  响应更快、刚度更高；如出现啸叫立刻停止\r\n");
+            for (int i = 0; i < 10; i++) {
+                fdcan_rx_user(0x500, d, 12);
+                HAL_Delay(10);
+            }
+            printf("  mit_kp=%.2f (expect 50), mit_kd=%.2f (expect 2)\r\n",
+                   controller_eyou.mit_kp, controller_eyou.mit_kd);
+            break;
+        }
+        case 6: {
+            /* Step 6: 速度跟随 (p=0, v=+0.5 rad/s, Kp=0, Kd=2) */
+            uint8_t d[] = {0xFF, 0xFF, 0x7F, 0x32, 0x83, 0xFF, 0x7F, 0x00, 0x00, 0x99, 0x19, 0x01};
+            printf("  [RX] ID=0x500 DLC=12 (v=+0.5 rad/s, Kp=0, Kd=2)\r\n");
+            printf("  电机应以 ~0.5 rad/s ≈ 4.77 rpm 输出端转动\r\n");
+            for (int i = 0; i < 10; i++) {
+                fdcan_rx_user(0x500, d, 12);
+                HAL_Delay(10);
+            }
+            printf("  mit_v_des=%.4f rad/s (expect 0.5)\r\n", controller_eyou.mit_v_des);
+            break;
+        }
+        case 7: {
+            /* Step 7: 转矩前馈 (t=+0.2 N·m, Kp=0, Kd=0) ⚠️ 无速度环保护 */
+            uint8_t d[] = {0xFF, 0xFF, 0x7F, 0xFF, 0x7F, 0x19, 0x80, 0x00, 0x00, 0x00, 0x00, 0x01};
+            printf("  [RX] ID=0x500 DLC=12 (t=+0.2 N·m, Kp=0, Kd=0)\r\n");
+            printf("  ⚠️ 转矩模式无速度环保护，空载会持续加速\r\n");
+            printf("  看到电流稳定后立即发 mit0 或 mit1 停止\r\n");
+            for (int i = 0; i < 10; i++) {
+                fdcan_rx_user(0x500, d, 12);
+                HAL_Delay(10);
+            }
+            printf("  mit_t_ff=%.2f A (expect ~0.2)\r\n", controller_eyou.mit_t_ff / 1024.0f);
+            printf("  I_q=%d\r\n", controller_eyou.I_q);
+            break;
+        }
+        default:
+            printf("  Unknown mit%d (valid: 0-7)\r\n", step);
+            break;
+        }
+
+        g_cantest_stub = 0;
+        printf("=== mit%d done ===\r\n", step);
     }
 
     memset((uint8_t *)dbgRecvBuf, 0, usart_rx_len);
@@ -917,7 +1051,7 @@ void dbg_log_print(void) {
                controller_eyou.velocity_ref_filterd / 1024,
                controller_eyou.dtheta_mech / 1024,
                controller_eyou.dtheta_mech_out / 1024,
-               controller_eyou.dtheta_mech / 1024 - controller_eyou.dtheta_mech_out / 1024);
+               controller_eyou.dtheta_mech / 1024 - controller_eyou.dtheta_mech_out * 25 / 1024);
         break;
     case 60:
         printf("%d, %d, %d\r\n", controller_eyou.CCR2, controller_eyou.CCR3, controller_eyou.CCR4);

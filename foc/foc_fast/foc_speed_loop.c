@@ -24,12 +24,16 @@ extern ifly_Err_Pro_Type motorProValue;
 void foc_velocity_close_loop(ControllerStruct* controller) {
   /* MIT PD 模式直接算 Iq, 跳过斜坡和速度 PID */
   if (controller->controller_mode == MIT_PD_MODE) {
-    static float vel_filt = 0.0f;
+    float vel_raw = (float)controller->dtheta_mech_out / 1024.0f *
+                    (2.0f * 3.14159265f / 60.0f);
+    if (!controller->mit_active) {
+      controller->mit_vel_filt = vel_raw;
+      controller->mit_active = 1;
+    }
+    controller->mit_vel_filt += 0.12f * (vel_raw - controller->mit_vel_filt);
     float pos_cur = (float)controller->real_position_out / (1024.0f * 180.0f / 3.14159265f);
-    float vel_raw = (float)controller->dtheta_mech_out / 1024.0f * (2.0f * 3.14159265f / 60.0f);
-    vel_filt += 0.05f * (vel_raw - vel_filt);
     float pos_err = controller->mit_p_des - pos_cur;
-    float vel_err = controller->mit_v_des - vel_filt;
+    float vel_err = controller->mit_v_des - controller->mit_vel_filt;
     /* 位置死区: 消除减速箱间隙引起的极限环 (±0.003 rad ≈ 0.17° 输出端) */
     if (pos_err >  0.003f) pos_err -= 0.003f;
     else if (pos_err < -0.003f) pos_err += 0.003f;
@@ -42,8 +46,10 @@ void foc_velocity_close_loop(ControllerStruct* controller) {
     if (iq_q10 >  max_cur) iq_q10 =  max_cur;
     if (iq_q10 < -max_cur) iq_q10 = -max_cur;
     controller->I_q_ref = iq_q10;
+    controller->I_d_ref = 0;
     return;
   }
+  controller->mit_active = 0;
 
   set_velocity_ref_loop(controller->velocity_ref);
   //

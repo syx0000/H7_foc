@@ -98,6 +98,7 @@ extern volatile uint8_t USART_CONTROL;
 #define VELOCETY_CALCULATE_DIV 2
 #define POSITION_CALCULATE_DIV 4
 #define SPEED_LOOP_FRE (FOC_FREQUENCY / VELOCETY_CALCULATE_DIV)
+#define FOC_GEAR_RATIO 25.0f
 #define SPEED_FILTER_DEPTH 16
 #define SPEED_UNIT 1024
 
@@ -565,6 +566,8 @@ typedef struct {
   float mit_t_ff;      /* 前馈扭矩 [A] (q轴电流, 实数) */
   float mit_kp;        /* 位置刚度 [A/rad] */
   float mit_kd;        /* 速度阻尼 [A·s/rad] */
+  float mit_vel_filt;  /* 速度 LPF 状态 [rad/s] */
+  uint8_t mit_active;  /* 上一拍是否在 MIT 模式 (用于切入时复位) */
 
   /* BEMF 前馈预算常量 (Init_foc 时计算, ISR 直接用) */
   float bemf_omega_e_k;  /* NPP * 2π / (1024 * 60) */

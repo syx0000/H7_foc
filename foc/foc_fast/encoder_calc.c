@@ -197,9 +197,10 @@ void Encoder_out_data_Calculate(ControllerStruct* controller, uint16_t hz) {
         jump_cnt = 0;
     }
 
-    /* 速度：(real_position_out - pre) * hz * 减速比 25 / 6   (/6 = *60/360) */
+    /* 速度：(real_position_out - pre) * hz / 6   (/6 = *60/360)
+       结果单位：输出端 rpm × 1024 */
     controller->dtheta_mech_out =
-        (controller->real_position_out - controller->real_position_out_pre) * hz * 25 / 6;
+        (controller->real_position_out - controller->real_position_out_pre) * hz / 6;
 
     controller->real_position_out_pre = controller->real_position_out;
     controller->old_angle_count_out = temp;

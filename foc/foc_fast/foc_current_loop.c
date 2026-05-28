@@ -113,7 +113,9 @@ void foc_current_close_loop(ControllerStruct* controller) {
 
   /* === step3: 斜坡 (限制基础指令变化率, 不平滑扫频/CAN 注入) === */
 #if USE_CURRENT_LOOP_FILTER
-  int32_t iq_smooth = CurrentLoopSmoothRun(iq_basic, &controller->CurrentSmooth);
+  int32_t iq_smooth = (controller->controller_mode == MIT_PD_MODE) ?
+                      iq_basic :
+                      CurrentLoopSmoothRun(iq_basic, &controller->CurrentSmooth);
 #else
   int32_t iq_smooth = iq_basic;
 #endif

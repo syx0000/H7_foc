@@ -124,6 +124,11 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
   - `bwtest7`: 速度环 autoTune (依赖 J/ψ_f/NPP)
   - `bwtest8`: 位置环 autoTune (经验公式)
   - `bwtest9`: 位置环带宽测试 (4~100Hz, CSP 模式注入 2°)
+- **cantest 测试链** (CAN 协议帧解码自测, stub 模式不上总线):
+  - `cantest1~7`: 0x200 速度 / 0x400 位置 / 0x100 状态帧打包 / 0x600 SDO 读写 / 0x701 CTRL 使能 / 250ms 超时看门狗
+  - `cantest8~19`: 0x500 MIT 12B 帧 (POS24+VEL16+T16+Kp16+Kd16+ID8) — 中点/边界/正负向 Kp Kd 量程验证
+  - MIT 单位映射: t_ff 走 Kt LUT (`can_wly.c::s_kt_lut`, 100A↔260 N·m), 超表外推; ±500 N·m 实测 ±168 A 属外推符合预期
+  - mit_t_ff 内部存 float A (非 Q10), printf 用 `%.3f A`
 
 ## 实测参数（已落盘 Flash）
 
@@ -231,6 +236,12 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
 "C:/Keil_v5/UV4/UV4.exe" -r "MDK-ARM/cubemx_yxsui.uvprojx" -j0
 ```
 
+**坑**: 在 git-bash / Claude Bash 工具里直接调 `"C:/Keil_v5/UV4/UV4.exe"` 会报 `No such file or directory`（路径解析问题，正反斜杠都不行）。要用 cmd.exe 包一层：
+```bash
+cmd.exe /c '"C:\Keil_v5\UV4\UV4.exe" -b "MDK-ARM\cubemx_yxsui.uvprojx" -j0'
+```
+PowerShell / Keil IDE 里直接用上面的原始命令没问题。
+
 **编译日志位置**: `MDK-ARM/cubemx_yxsui/cubemx_yxsui.build_log.htm` (HTML格式)
 
 **编译产物**:
@@ -240,7 +251,7 @@ Flag 值 == `OFFEST_IS_CORRECTED_FLAG` (50) 表示有效，其它视为无效（
 
 ### 当前编译规模
 ```
-Program Size: Code=87372 RO-data=4820 RW-data=732 ZI-data=27780
+Program Size: Code=105236 RO-data=13832 RW-data=420 ZI-data=28324
 "cubemx_yxsui\cubemx_yxsui.axf" - 0 Error(s), 0 Warning(s).
 ```
 
@@ -252,6 +263,7 @@ Program Size: Code=87372 RO-data=4820 RW-data=732 ZI-data=27780
 ```bash
 "C:/Keil_v5/UV4/UV4.exe" -f "MDK-ARM/cubemx_yxsui.uvprojx"
 ```
+git-bash 同样需要 cmd.exe 包一层：`cmd.exe /c '"C:\Keil_v5\UV4\UV4.exe" -f "MDK-ARM\cubemx_yxsui.uvprojx"'`
 - 退出码 0 = 成功；UV4 无 stdout，烧录结果靠退出码判断。
 - **坑**: 加 `-o <logfile>` 参数会让 UV4 段错误 (ExitCode=139)，不要加日志重定向。
 - 该命令会 Erase → Program → Verify → Reset Run，可直接作为"DAP 重启"使用（抓 log 时用这个代替按复位键）。
@@ -448,7 +460,7 @@ extern volatile uint32_t g_adc_isr_cycles_max;   // ADC ISR 历史最大耗时
 
 - **分支**: main
 - **用户**: syx0000
-- **最近主要工作**: 故障保护层 + CAN 万里扬 V1.7 协议从站 + BEMF 前馈 + 过调制对策 + cantest 单元自测
+- **最近主要工作**: 故障保护层 + CAN 万里扬 V1.7 协议从站 + BEMF 前馈 + 过调制对策 + cantest 单元自测（含 0x500 MIT 12B 帧 19 个 case）
 
 ## 相关文档
 
