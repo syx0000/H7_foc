@@ -15,8 +15,12 @@
 #include <stddef.h>
 #include <stdint.h>
 /*******************************版本信息*************************************************/
-#define SOFT_VERSION "20260331.1"
-#define HARD_VERSION "20250902"
+#define SOFT_VERSION "20260528.1"
+#define HARD_VERSION "20260528"
+#define BUILD_DATE   __DATE__
+#define BUILD_TIME   __TIME__
+/* 打印 banner: "LT H7 foc  SW=<x>  HW=<y>  build <date> <time>" */
+#define FW_BANNER_FMT "FW SW=%s HW=%s build %s %s\r\n"
 /*******************************功能配置*************************************************/
 /* Runtime-controllable serial debug flag (0=off, 1=on). Replaces compile-time macro USART_CONTROL. */
 extern volatile uint8_t USART_CONTROL;

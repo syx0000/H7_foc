@@ -133,8 +133,15 @@ int main(void)
 
 	HAL_Delay(500);
 	printf("LT H7 foc start\r\n");
+	printf(FW_BANNER_FMT, SOFT_VERSION, HARD_VERSION, BUILD_DATE, BUILD_TIME);
 	HAL_GPIO_WritePin(EN_GATE_GPIO_Port,EN_GATE_Pin,GPIO_PIN_SET);
 	HAL_Delay(500);
+
+	/* 上电时 EN_GATE=0, DRV 处于 sleep, nFAULT 被内部下拉至低,
+	 * BKIN 极性 LOW + BDTR.BKE=1 会把 BIF latch 到 SR.
+	 * EN_GATE 拉高 + tWAKE 稳定后, 清掉这次上电误锁存. */
+	TIM1->SR = ~TIM_SR_BIF;
+	__DSB();
 
 	/* 启动TIM1 PWM输出、中断和CH4编码器预触发 */
 	TIM1_PWM_Start();

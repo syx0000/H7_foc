@@ -161,6 +161,11 @@ void dbg_cmd_set(void) {
 
     if (usart_rx_len == 0) return;
 
+    /* version: 打印固件/硬件版本 + 编译时间, 用于核对烧录的 hex */
+    if (NULL != strstr((const char *)dbgRecvBuf, "version")) {
+        printf(FW_BANNER_FMT, SOFT_VERSION, HARD_VERSION, BUILD_DATE, BUILD_TIME);
+    }
+
     if (NULL != strstr((const char *)dbgRecvBuf, "logid")) {
         loc        = strstr((char *)dbgRecvBuf, "logid");
         token      = strtok(loc, "logid");
