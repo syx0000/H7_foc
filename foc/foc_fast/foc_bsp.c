@@ -166,6 +166,16 @@ void dbg_cmd_set(void) {
         printf(FW_BANNER_FMT, SOFT_VERSION, HARD_VERSION, BUILD_DATE, BUILD_TIME);
     }
 
+    /* reset: 触发 NVIC 系统复位, 用于上位机重启 MCU 而无需按物理按键 */
+    if (NULL != strstr((const char *)dbgRecvBuf, "reset")) {
+        printf("System reset requested...\r\n");
+        /* 给 USART DMA 把上一行字节送出, 否则上位机收不到 banner */
+        HAL_Delay(20);
+        fault_safe_shutdown();
+        HAL_Delay(50);
+        NVIC_SystemReset();
+    }
+
     if (NULL != strstr((const char *)dbgRecvBuf, "logid")) {
         loc        = strstr((char *)dbgRecvBuf, "logid");
         token      = strtok(loc, "logid");
@@ -381,6 +391,8 @@ void dbg_cmd_set(void) {
         if (cmd_val == 0) {
             fault_safe_shutdown();
             printf("Runcmd0: safe shutdown initiated\r\n");
+            memset((uint8_t *)dbgRecvBuf, 0, usart_rx_len);
+            usart_rx_len = 0;
             return;
         }
 
@@ -418,7 +430,7 @@ void dbg_cmd_set(void) {
                    controller_eyou.controller_mode == CYCLIC_SYNC_VELOCITY_MODE) {
             controller_eyou.velocity_ref = Data * 1024 * 25;
         } else if (controller_eyou.controller_mode == PROFILE_POSITION_MODE ||
-                   controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE) {
+                   controller_eyou.controller_mode == CYCLIC_SYNC_POSITION_MODE) {
             int32_t p_ref = Data * 1024;
             if (controller_eyou.FlashData.PositionLimitFlag == 50) {
                 int32_t pmax = controller_eyou.FlashData.MaxPositionLimit;
