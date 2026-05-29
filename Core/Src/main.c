@@ -38,6 +38,7 @@
 #include "ifly_fault.h"
 #include "can_wly.h"
 #include "flash_port.h"
+#include "ota_app.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -87,6 +88,14 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
 
+  /* Stage 2 OTA: app always runs from 0x08020000 (single execution slot).
+     Bootloader copies staging→App if a pending update is present.
+     We re-set VTOR here for the dev-mode case where the debugger bypasses
+     the bootloader and leaves VTOR at 0. */
+  SCB->VTOR = 0x08020000U;
+  __DSB();
+  __ISB();
+
   /* USER CODE END 1 */
 
   /* MPU Configuration--------------------------------------------------------*/
@@ -132,7 +141,7 @@ int main(void)
 	DPT_Encoder_Init(&huart2);
 
 	HAL_Delay(500);
-	printf("LT H7 foc start\r\n");
+	printf("LT H7 foc start!\r\n");
 	printf(FW_BANNER_FMT, SOFT_VERSION, HARD_VERSION, BUILD_DATE, BUILD_TIME);
 	HAL_GPIO_WritePin(EN_GATE_GPIO_Port,EN_GATE_Pin,GPIO_PIN_SET);
 	HAL_Delay(500);
@@ -214,6 +223,7 @@ int main(void)
 
 	/* 启动USART1调试命令接收 */
 	USART1_DebugRx_Start();
+	ota_init();
 
 	/* 万里扬FDCAN协议从站初始化 (fdcan_rx_user 已在 can_wly.c 中覆盖弱符号) */
 	can_wly_init();
@@ -232,6 +242,16 @@ int main(void)
     /* USER CODE BEGIN 3 */
 		/* 调试串口命令解析 */
 		dbg_cmd_set();
+
+		/* OTA 数据帧处理（OTA 接收模式下消化 ring buffer） */
+		ota_process();
+
+		/* Stage 2 OTA: 启动 5s 内未触发故障 → 标记当前槽稳定（清 boot_count） */
+		static uint8_t s_marked_stable = 0;
+		if (!s_marked_stable && HAL_GetTick() > 5000U) {
+			ota_mark_self_stable();
+			s_marked_stable = 1;
+		}
 
 		/* CAN 0x2F01 学零位请求 (ISR 设标志, 主循环执行) */
 		if (g_can_cali_request) {

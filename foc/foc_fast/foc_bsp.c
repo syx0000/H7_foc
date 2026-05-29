@@ -22,6 +22,7 @@
 #include "fdcan.h"
 #include "can_wly.h"
 #include "stm32h7xx_hal.h"
+#include "ota_app.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -1059,6 +1060,45 @@ void dbg_cmd_set(void) {
 
         g_cantest_stub = 0;
         printf("=== mit%d done ===\r\n", step);
+    }
+
+    /* ---------------- OTA firmware upgrade (Stage 1) ----------------
+       otabegin SIZE=<n> CRC=0x<hex> VER=<v>  → erase App-B, switch RX to OTA mode
+       otaend                                 → finalize, verify CRC, write header
+       otaabort                               → cancel, clear App-B header
+       otaswap                                → reset (Stage 2 bootloader will pick) */
+    extern volatile uint8_t g_ota_rx_mode;
+
+    if (NULL != strstr((char *)dbgRecvBuf, "otabegin")) {
+        char *p_size = strstr((char *)dbgRecvBuf, "SIZE=");
+        char *p_crc  = strstr((char *)dbgRecvBuf, "CRC=0x");
+        char *p_ver  = strstr((char *)dbgRecvBuf, "VER=");
+        if (p_size && p_crc) {
+            uint32_t size = (uint32_t)atoi(p_size + 5);
+            uint32_t crc  = (uint32_t)strtoul(p_crc + 6, NULL, 16);
+            uint32_t ver  = p_ver ? (uint32_t)atoi(p_ver + 4) : 0;
+            if (ota_begin(size, crc, ver) == 0) {
+                /* Switch RX path to OTA mode AFTER OTA_READY is printed,
+                   so further bytes go to the OTA ring buffer. */
+                g_ota_rx_mode = 1;
+            }
+        } else {
+            printf("OTA_ERR bad_begin_args\r\n");
+        }
+    }
+    else if (NULL != strstr((char *)dbgRecvBuf, "otaend")) {
+        /* Caller flushes RX path back to text mode before sending otaend.
+           If we reach here, g_ota_rx_mode has already been cleared by main loop. */
+        ota_end();
+    }
+    else if (NULL != strstr((char *)dbgRecvBuf, "otaabort")) {
+        g_ota_rx_mode = 0;
+        ota_abort();
+    }
+    else if (NULL != strstr((char *)dbgRecvBuf, "otaswap")) {
+        printf("Reboot for swap...\r\n");
+        HAL_Delay(50);
+        NVIC_SystemReset();
     }
 
     memset((uint8_t *)dbgRecvBuf, 0, usart_rx_len);

@@ -385,11 +385,16 @@ void isr_print(const char *str)
     }
 }
 
-#define DBG_RX_BUF_SIZE 128
+#define DBG_RX_BUF_SIZE 512
 static uint8_t usart1_rx_dma_buf[DBG_RX_BUF_SIZE];
 
 extern uint8_t dbgRecvBuf[1024];
 extern volatile uint16_t usart_rx_len;
+
+/* OTA mode flag — set by foc_bsp.c when otabegin is parsed.
+   In OTA mode the RX callback streams raw bytes to ota_rx_feed() instead
+   of the text command path (avoids NUL bytes / strstr corruption). */
+volatile uint8_t g_ota_rx_mode = 0;
 
 void USART1_DebugRx_Start(void)
 {
@@ -400,7 +405,13 @@ void USART1_DebugRx_Start(void)
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
     if (huart->Instance == USART1) {
-        if (usart_rx_len == 0) {
+        if (g_ota_rx_mode) {
+            /* OTA mode: feed raw bytes directly to OTA ring buffer.
+               Do NOT touch dbgRecvBuf — binary data with NUL/CR/LF would
+               corrupt subsequent strstr-based parsing. */
+            extern void ota_rx_feed(const uint8_t *data, uint16_t len);
+            ota_rx_feed(usart1_rx_dma_buf, Size);
+        } else if (usart_rx_len == 0) {
             memcpy(dbgRecvBuf, usart1_rx_dma_buf, Size);
             usart_rx_len = Size;
         }

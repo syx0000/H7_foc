@@ -28,7 +28,9 @@ HAL_StatusTypeDef Flash_WriteData(uint32_t addr, const void *data, uint32_t len)
 {
     /* 地址必须 32 字节对齐 */
     if (addr & (FLASH_WRITE_GRANULARITY - 1)) return HAL_ERROR;
-    if (addr < FLASH_USER_START_ADDR) return HAL_ERROR;
+    /* 必须落在片内 Flash 范围 (Bank1 + Bank2, 2MB) 内.
+       具体扇区是否擦过由调用者负责; 这里只挡明显越界的指针. */
+    if (addr < 0x08000000U || addr >= 0x08200000U) return HAL_ERROR;
 
     HAL_FLASH_Unlock();
 

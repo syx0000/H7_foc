@@ -1,0 +1,16 @@
+; *************************************************************
+; *** Bootloader scatter file ***
+; *** Locks the bootloader to Bank1 Sector 0 (0x08000000, 128KB) ***
+; *************************************************************
+
+LR_IROM1 0x08000000 0x00020000  {    ; load region: 128KB
+  ER_IROM1 0x08000000 0x00020000  {  ; execution region
+   *.o (RESET, +First)
+   *(InRoot$$Sections)
+   .ANY (+RO)
+   .ANY (+XO)
+  }
+  RW_IRAM1 0x20000000 0x00020000  {  ; DTCM 128KB
+   .ANY (+RW +ZI)
+  }
+}

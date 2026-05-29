@@ -553,9 +553,10 @@ boot_count += 1 写回 header
 
 #### 5.2 块大小选择
 
-- chunk = 1024B（1KB）→ 768KB 固件 = **768 块**
-- 921600 baud 理论上行 ~92KB/s，加 ACK 往返开销 → **预估 ~12s** 烧 768KB
-- 太小（如 64B）会被 ACK 往返时延吃掉吞吐；太大（如 8KB）超过 STM32 USART DMA RX buffer，需要拆。
+- 固件侧 USART1 RX 用 `HAL_UARTEx_ReceiveToIdle_DMA`，DMA buffer 仅 **128B**（`Core/Src/usart.c::usart1_rx_dma_buf`）。OTA 模式下 RX 回调把 raw bytes 直推到独立 4KB ring buffer，绕开 `dbgRecvBuf`（避免二进制中的 0x00 破坏 `strstr`）。
+- chunk = **256B** → 768KB 固件 = **3072 块**
+- 921600 baud 理论上行 ~92KB/s；ACK 往返每块约 1~2ms → **预估 ~12s** 烧 768KB
+- 256B 是 32B 写粒度的 8 倍，每 chunk 收齐就能写一次 Flash，不需要二级缓冲。
 
 #### 5.3 错误处理
 
@@ -669,11 +670,13 @@ class OTAUploader(QThread):
 
 ### 10.10 实施顺序
 
-1. **第一阶段（应用侧 OTA 接收器）**：直接在现有应用里加 `ota_begin/data/end` 命令处理，写 Bank2 Sector 0~5 当备份槽（不切槽，仅打通"上位机能可靠传 768KB 到 Flash"这个环节）。验收：上位机传完后用 `Flash_ReadData` 读回比对 CRC32 OK。
+1. **第一阶段（应用侧 OTA 接收器）— ✅ 已落地**：
+   - 固件：`Core/Inc/ota_app.h` + `Core/Src/ota_app.c`（256B chunk + CRC16-MODBUS 帧解析 + 32B 写粒度累积），`Core/Src/usart.c` RX 回调加 `g_ota_rx_mode` 旁路把二进制 chunk 喂给 `ota_rx_feed()`，`foc_bsp.c::dbg_cmd_set` 加 `otabegin / otaend / otaabort / otaswap` 命令，`main.c` 主循环加 `ota_process()` 调度。编译：Code 105KB → 109KB（+4KB），0 Error 0 Warning。
+   - 上位机：`core/protocol.py` 加 `build_ota_*` + `crc16_modbus` + `build_ota_data_frame`；`core/serial_worker.py` 加 `send_bytes()` 二进制旁路；新增 `core/ota_worker.py`（`OTAUploader` QThread，begin/data/end 状态机 + ACK queue + 重传 + 超时）；`gui/maintenance_panel.py` 把 stub 替换为真实上传 + 进度条 + 取消按钮 + 完成弹窗 + busy 信号。
+   - 测试：`tests/test_ota.py` 覆盖 CRC16 标准向量、CRC32 与 zlib 等价、frame 字节布局、超长 payload 拒绝、seq u16 wrap。
+   - 验收：上位机选 .bin → Upload → 固件擦 App-B → 全片传输 → CRC32 校验 → 写 App-B header。**不切槽**，App-A 继续运行。
 2. **第二阶段（Bootloader 工程）**：独立 MDK 子工程，实现选槽 + 跳转 + 回滚。和应用之间通过 header 通信。
 3. **第三阶段（联调）**：bootloader + 应用 + 上位机三方跑通整条 OTA → swap → 启动新固件。
-
-当前 `gui/maintenance_panel.py` 的 OTA stub UI 直接对应第一阶段的可视面板，协议落地后只要把 stub 的 `_on_upload_clicked` 替换成 `OTAUploader` 实例化即可。
 
 ---
 
@@ -686,3 +689,248 @@ class OTAUploader(QThread):
 | Phase 3 | 带宽测试 + Bode 图 + 一键辨识序列 | ✅ 已完成 |
 | Phase 4 | Flash 管理 + 故障诊断 + Cali + OTA 入口 | ✅ 已完成（OTA 协议 stub） |
 | 后续 | 历史 CSV 导出 / 波形截图 / 二进制高速协议 / OTA 协议落地 | ⏸ 待办 |
+
+<!-- STAGE2_PLACEHOLDER -->
+
+---
+
+## 12. OTA Stage 2 — Bootloader + 单槽 + staging 拷贝
+
+> 历史：最初设计是双槽 A/B + 启动选槽。实测发现应用代码链接到固定地址 (0x08020000)，烧到 B 槽 (0x08100000) 时所有绝对地址引用仍指向 A，导致 B 槽 reset_handler 立即把 CPU 转回 A 槽，VTOR / `&main` 地址判断都失效。要让两个槽都能独立运行需要应用编译两份 (一份链 A、一份链 B)，每次改代码 build 两次成本不合算。
+>
+> 最终方案：**单槽运行 + staging 接收 + bootloader 拷贝**。应用永远在 0x08020000 跑，OTA 只往 staging 写，重启后 bootloader 把 staging 拷到 App 槽，再跳 App。
+
+### 12.1 最终 Flash 布局
+
+```
+0x08000000 ┌────────────────────────────┐  Bank1
+           │ Bootloader  Sector 0       │  128KB  ← Stage 2 新增
+0x08020000 ├────────────────────────────┤
+           │ App         Sector 1~6     │  768KB  ← 唯一执行槽
+0x080E0000 ├────────────────────────────┤
+           │ App header  Sector 7       │  128KB  ← 由 bootloader / build_app_hex.py 写
+0x08100000 ├════════════════════════════┤  Bank2
+           │ Staging     Sector 0~5     │  768KB  ← OTA 接收 + 待提交区
+0x081C0000 ├────────────────────────────┤
+           │ Staging hdr Sector 6       │  128KB  ← 含 magic+CRC+PENDING
+0x081E0000 ├────────────────────────────┤
+           │ FOC 参数    Sector 7       │  128KB  ← 已有，不动
+0x08200000 └────────────────────────────┘
+```
+
+### 12.2 Header 结构（128B，写在两边的 header 扇区）
+
+```c
+typedef struct {
+    uint32_t magic;        // 'FOCA' = 0x41434F46
+    uint32_t version;
+    uint32_t app_size;     // 字节数（不含 header）
+    uint32_t app_crc32;    // IEEE 802.3 / zlib
+    uint32_t boot_count;   // bootloader 每次启动 ++，应用稳定后清 0
+    uint32_t flags;        // bit0=VALID, bit1=PENDING (staging 专用)
+    uint32_t build_time;
+    uint32_t reserved[25];
+} app_header_t;
+```
+
+### 12.3 Bootloader 流程
+
+```
+boot_main:
+  1. 检查 staging header:
+     if magic == FOCA && flags.PENDING:
+       验证 CRC32(staging, app_size):
+         OK → 擦 App slot (Sector 1~6) + App header (Sector 7)
+            → 用 HAL_FLASH_Program 把 staging 一字一字拷到 App
+            → 写 App header (VALID, count=0, 不含 PENDING)
+            → 擦 staging header (清 PENDING 防止下次再拷)
+         FAIL → 擦 staging header 丢弃，继续 step 2
+
+  2. 验证 App header:
+     if magic == FOCA && CRC ok:
+       count++ 写回 → 跳 0x08020000
+
+  3. Dev fallback:
+     检查 0x08020000 的向量表 (SP 在 RAM、Reset_Handler 在 Flash):
+       OK → 直接跳 (不写 boot_count，方便 Keil 烧 .axf 调试)
+       FAIL → stuck loop + UART 持续打印
+```
+
+### 12.4 Application 配合
+
+- `main.c` 入口先设 `SCB->VTOR = 0x08020000`（dev-mode 复位时 VTOR 还是 0，要修正）
+- `ota_app.c::ota_begin` target 永远是 staging (Bank2 Sector 0~6)
+- `ota_app.c::ota_end` 写 staging header 时 flags = `VALID | PENDING`
+- `ota_app.c::ota_mark_self_stable` 启动 5s 后清 App header 的 boot_count
+
+### 12.5 Post-build header 注入 (`tools/build_app_hex.py`)
+
+应用 .bin → zlib.crc32 → app_header_t → intelhex 合并到 `cubemx_yxsui.hex`：
+- 0x08020000 起放 .bin 全部数据
+- 0x080E0000 起放 128B header (VALID, count=0, 不含 PENDING)
+
+MDK after-build 第二行命令：`cmd.exe /c "py ..\tools\build_app_hex.py --version=N"`（注意 IDE 偶尔会清空 UserProg2Name，需要在 Options for Target → User → After Build/Rebuild 重新填上）。
+
+### 12.6 实施过程踩到的坑（按发生顺序）
+
+1. **`%lu` vs `uint32_t`**：ARMCLANG 下 `uint32_t == unsigned int`，不是 unsigned long。`printf("%lu", uint32_t_val)` 会出 warning。统一用 `(unsigned)x` cast + `%u`。
+2. **Flash_WriteData 的 guard 太窄**：原来只允许写参数区 (0x081E0000+)，OTA 写 staging (0x08100000) 直接被拒。改成允许整个内部 Flash (0x08000000~0x08200000)，安全性靠调用者自己保证。
+3. **DAP 烧两次互相擦**：先烧应用再烧 bootloader，第二次 DAP 会先 mass-erase Bank1，把刚烧的应用抹掉。解决：用 intelhex.merge() 把两个 hex 合并成一个，一次烧。
+4. **MDK 烧 .axf 不带 header**：post-build 脚本生成的 .hex 含 header，但 Keil "Download" 默认下载 .axf。解决方案有两条：(a) 改 Keil utilities 用 .hex；(b) bootloader 加 dev fallback：没 header 但向量表合法时直接跳。我们选了 (b)。
+5. **OTA frame 数据损坏**：`DBG_RX_BUF_SIZE = 128`，但单个 OTA frame 是 264 字节 (6 + 256 + 2)。frame 跨多次 IDLE 收到，DMA 重启动间隙丢字节。改成 512B 解决。
+6. **ring buffer 没 reset**：`ota_init` 只清一次，OTA 重启后 ring 还有上次尾巴。`ota_begin` 加 `head = tail = 0`。
+7. **VTOR 自检不可靠**：`(uint32_t)&main` 永远是 0x08020xxx (链接地址)，无法分辨当前从哪个槽运行。直接放弃双槽方案 → staging 拷贝。
+8. **`__set_MSP` 后 C 栈失效**：bootloader 跳转用局部变量 `pc` 可能在旧栈上，MSP 改了之后读到垃圾。改用全局 `s_app_entry`（在 .bss，不依赖栈）。
+
+### 12.7 实测部署步骤（首次烧入）
+
+1. Keil 编译 bootloader 工程 → `MDK-ARM/bootloader/bootloader.hex`
+2. Keil 编译应用工程 → `MDK-ARM/cubemx_yxsui/cubemx_yxsui.bin`
+3. 跑 `py tools/build_app_hex.py --version=1` → 生成带 header 的 `cubemx_yxsui.hex`
+4. `py -c "from intelhex import IntelHex; b=IntelHex('MDK-ARM/bootloader/bootloader.hex'); a=IntelHex('MDK-ARM/cubemx_yxsui/cubemx_yxsui.hex'); b.merge(a); b.write_hex_file('MDK-ARM/combined.hex')`
+5. STM32CubeProgrammer 烧 `combined.hex`，一次完成 bootloader + App + App header
+6. 复位看串口：bootloader → App → "BOOT: marked self stable"
+
+之后所有升级走 OTA → staging → 重启 → bootloader 拷贝 → App 跑新版本。
+
+### 12.8 阶段进度
+
+| 阶段 | 范围 | 状态 |
+|------|------|------|
+| Stage 1 | 应用侧 OTA 接收器 + 上位机客户端 + CRC32 校验 | ✅ 已完成 |
+| Stage 2 | 独立 bootloader + staging 拷贝 + boot_count 回滚 + post-build header 注入 + dev fallback | ✅ 已完成 |
+| 后续 | 写保护 OPTSR.WRP 锁 bootloader 扇区 / 双槽 A+B 真正回滚 (需要应用两份编译) | ⏸ 待办 |
+
+应用 Code+RO ≈ 125KB，远小于 768KB；ZI 32KB，全在 SRAM；boot_count 写回每槽自己的 header 扇区。
+
+### 12.2 Scatter 改动
+
+应用 `MDK-ARM/cubemx_yxsui.sct`：
+
+```
+; 原: LR_IROM1 0x08000000 0x00200000
+; 改: LR_IROM1 0x08020000 0x000C0000   ; App-A 槽 768KB
+LR_IROM1 0x08020000 0x000C0000  {
+  ER_IROM1 0x08020000 0x000C0000 { *.o (RESET, +First) ... }
+  RW_IRAM1 0x20000000 0x00020000 { .ANY (+RW +ZI) }
+  RW_IRAM2 0x24000000 0x00080000 { .ANY (+RW +ZI) }
+}
+```
+
+应用 `main.c` 在 `SystemInit` 之后立刻设 `SCB->VTOR = 0x08020000`（向量表跟着搬）。Bootloader 跳转前也设 VTOR 到目标槽起始。
+
+### 12.3 Bootloader 选槽算法
+
+```
+boot_main():
+  uart_init() + clock_init() (可选, 失败时打印日志用)
+  hdr_a = read(App-A header)
+  hdr_b = read(App-B header)
+
+  candidates = []
+  for h in [hdr_a, hdr_b]:
+      if h.magic == FOCA && h.flags.bit0 (valid) && h.boot_count < 3:
+          if Flash_Crc32(slot, h.app_size) == h.app_crc32:
+              candidates.append(h)
+
+  if len(candidates) == 0:
+      → stuck loop, 闪 LED + 串口 "no valid slot"
+  else:
+      target = max(candidates, key=lambda h: h.version)
+      target.boot_count += 1
+      flash_rewrite_header(target)        ; 必须先擦再写整个 header 扇区
+      jump_to_app(target.start_addr)
+```
+
+**boot_count 状态机**（关键）：
+- bootloader 每次跳转前：`boot_count += 1` 写回该槽 header
+- 应用启动稳定后（如闭环跑过 N 次循环）：`boot_count = 0` 写回自己的 header
+- 连续 3 次启动没清零：`boot_count >= 3`，bootloader 把这个槽踢出候选，自动切到另一槽
+- 单纯重启不会触发回滚：每次启动应用都会把 count 清零
+
+**header 写回的代价**：要重写 128KB 扇区（先 erase 再 write）。每次启动都写一次有点重，但 H7 Flash 寿命 10K 次，按一天开机 10 次算够用 3 年。如果嫌频繁也可以做 in-place programming 技巧（不擦只把某些 bit 1→0），但那会让 header 格式复杂化，先用最简方案。
+
+### 12.4 跳转代码
+
+```c
+typedef void (*app_entry_t)(void);
+
+static void jump_to_app(uint32_t app_base)
+{
+    uint32_t sp  = *(volatile uint32_t *)(app_base);       // 向量表第 0 项
+    uint32_t pc  = *(volatile uint32_t *)(app_base + 4);   // Reset_Handler
+
+    HAL_RCC_DeInit();
+    HAL_DeInit();
+    SysTick->CTRL = 0;
+    SysTick->LOAD = 0;
+    SysTick->VAL  = 0;
+    for (int i = 0; i < 8; i++) NVIC->ICER[i] = 0xFFFFFFFF;
+    for (int i = 0; i < 8; i++) NVIC->ICPR[i] = 0xFFFFFFFF;
+
+    SCB->VTOR = app_base;
+    __DSB(); __ISB();
+    __set_MSP(sp);
+    ((app_entry_t)pc)();
+    while (1);  // never reached
+}
+```
+
+### 12.5 Post-build header 注入脚本
+
+应用编译产物 `cubemx_yxsui.bin` 不带 header；用 Python 脚本在编译后自动拼一个：
+
+```
+tools/build_app_hex.py:
+  1. 读 MDK-ARM/cubemx_yxsui/cubemx_yxsui.bin (fromelf 输出)
+  2. crc32 = zlib.crc32(data) & 0xFFFFFFFF
+  3. header = struct.pack("<IIIIIII100x",
+         0x41434F46, version, len(data), crc32, 0, 0x01, build_time)
+  4. 用 intelhex 库:
+       ih = IntelHex()
+       ih.frombytes(data, offset=0x08020000)            # App-A 区
+       ih.frombytes(header, offset=0x080E0000)          # App-A header
+       ih.tofile("cubemx_yxsui_signed.hex", format='hex')
+  5. .hex 直接给 UV4 -f 用，DAP 一次烧 bootloader + 应用 + header
+```
+
+MDK 的 After Build 命令链：
+```
+fromelf --bin -o "cubemx_yxsui.bin" "cubemx_yxsui.axf"
+python ../tools/build_app_hex.py --version=1
+```
+
+### 12.6 部署流程（首次烧录）
+
+1. 编译 bootloader 子工程 → `bootloader.hex`（地址 `0x08000000`）
+2. 编译应用 → after-build 自动出 `cubemx_yxsui_signed.hex`（含应用 + header）
+3. 合并两个 hex（intelhex 命令行 / srec_cat / 或手动加进同一个 .hex）
+4. 用 DAP 烧合并后的 hex
+5. 上电：bootloader 看到 App-A magic 有效 + CRC 通过 → 跳转，应用正常运行
+
+之后任何升级走 OTA：上位机传 → 写 App-B → header valid → 用户点 "Reboot for swap" → bootloader 看到 App-B version > A → 跳 B → 应用启动稳定后清 boot_count。
+
+### 12.7 风险与对策
+
+| 风险 | 对策 |
+|------|------|
+| Bootloader 自己挂掉 | STM32H7 选项字节 OPTSR.WRP 锁 Bank1 Sector 0；DAP 仍能解锁恢复 |
+| 应用启动到一半就挂（清 boot_count 之前） | 连续 3 次都没清 → bootloader 自动切槽。**前提**：另一槽是好的 |
+| 双槽都坏 | bootloader 进死循环 + UART 持续打印 "no valid slot" + LED 闪。用户必须 DAP 恢复 |
+| 跨 Bank 跳转抖动 | 跳转前 `HAL_DeInit + SysTick=0 + NVIC ICER/ICPR 全清`；VTOR + MSP 必须正确 |
+| Bank2 Sector 7 (FOC 参数) 被 OTA 覆盖 | OTA 只擦 Sector 0~6，Sector 7 安全；Stage 1 已实测 |
+| 烧录顺序错误 (先应用后 bootloader) | 合并 hex 一次烧解决；MDK 的 .uvprojx 配置成只烧合并产物 |
+
+### 12.8 实施顺序
+
+1. **task #9 ✅** 布局设计（本节）
+2. **task #13** post-build 脚本（最先做，应用先有 signed hex 才能联调）
+3. **task #12** 应用 scatter 改 0x08020000 + VTOR 设置
+4. **task #14** 应用启动后清 boot_count（写自己 header 扇区）
+5. **task #10** 创建 bootloader MDK 子工程骨架
+6. **task #11** bootloader 选槽 + 跳转逻辑
+7. **task #15** 端到端验证（OTA → swap → 启动 B → 清 count；故意写坏 B 验证回滚 A）
+
+
+
+

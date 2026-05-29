@@ -13,3 +13,7 @@ MDK-ARM/RTE/_*/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# Stage 2 OTA build outputs
+MDK-ARM/bootloader/
+MDK-ARM/combined.hex

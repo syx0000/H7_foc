@@ -7,7 +7,7 @@
 
   <Targets>
     <Target>
-      <TargetName>cubemx_yxsui</TargetName>
+      <TargetName>bootloader</TargetName>
       <ToolsetNumber>0x4</ToolsetNumber>
       <ToolsetName>ARM-ADS</ToolsetName>
       <pCCUsed>6240000::V6.24::ARMCLANG</pCCUsed>
@@ -48,8 +48,8 @@
             <NotGenerated>0</NotGenerated>
             <InvalidFlash>1</InvalidFlash>
           </TargetStatus>
-          <OutputDirectory>cubemx_yxsui\</OutputDirectory>
-          <OutputName>cubemx_yxsui</OutputName>
+          <OutputDirectory>bootloader\</OutputDirectory>
+          <OutputName>bootloader</OutputName>
           <CreateExecutable>1</CreateExecutable>
           <CreateLib>0</CreateLib>
           <CreateHexFile>1</CreateHexFile>
@@ -81,9 +81,9 @@
           </BeforeMake>
           <AfterMake>
             <RunUserProg1>1</RunUserProg1>
-            <RunUserProg2>1</RunUserProg2>
+            <RunUserProg2>0</RunUserProg2>
             <UserProg1Name>fromelf --bin -o "$L@L.bin" "#L"</UserProg1Name>
-            <UserProg2Name>cmd.exe /c "py ..\tools\build_app_hex.py --version=1"</UserProg2Name>
+            <UserProg2Name></UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
             <UserProg2Dos16Mode>0</UserProg2Dos16Mode>
             <nStopA1X>0</nStopA1X>
@@ -276,8 +276,8 @@
               </OCR_RVCT3>
               <OCR_RVCT4>
                 <Type>1</Type>
-                <StartAddress>0x8020000</StartAddress>
-                <Size>0xc0000</Size>
+                <StartAddress>0x8000000</StartAddress>
+                <Size>0x20000</Size>
               </OCR_RVCT4>
               <OCR_RVCT5>
                 <Type>1</Type>
@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_PWR_LDO_SUPPLY,USE_HAL_DRIVER,STM32H743xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../foc/foc_app;../foc/foc_fast</IncludePath>
+              <IncludePath>../Core/Inc;../Bootloader/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -367,11 +367,11 @@
             <Rwpi>0</Rwpi>
             <noStLib>0</noStLib>
             <RepFail>1</RepFail>
-            <useFile>0</useFile>
+            <useFile>1</useFile>
             <TextAddressRange></TextAddressRange>
             <DataAddressRange></DataAddressRange>
             <pXoBase></pXoBase>
-            <ScatterFile></ScatterFile>
+            <ScatterFile>.\bootloader.sct</ScatterFile>
             <IncludeLibs></IncludeLibs>
             <IncludeLibsPath></IncludeLibsPath>
             <Misc></Misc>
@@ -392,153 +392,52 @@
           </Files>
         </Group>
         <Group>
-          <GroupName>Application/User/Core</GroupName>
+          <GroupName>Bootloader</GroupName>
           <Files>
             <File>
-              <FileName>encoder.c</FileName>
+              <FileName>boot_main.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Core/Src/encoder.c</FilePath>
+              <FilePath>../Bootloader/Src/boot_main.c</FilePath>
             </File>
             <File>
-              <FileName>flash_port.c</FileName>
+              <FileName>boot_clock.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Core/Src/flash_port.c</FilePath>
+              <FilePath>../Bootloader/Src/boot_clock.c</FilePath>
             </File>
             <File>
-              <FileName>can_wly.c</FileName>
+              <FileName>boot_uart.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Core/Src/can_wly.c</FilePath>
+              <FilePath>../Bootloader/Src/boot_uart.c</FilePath>
             </File>
             <File>
-              <FileName>main.c</FileName>
+              <FileName>boot_crc32.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Core/Src/main.c</FilePath>
+              <FilePath>../Bootloader/Src/boot_crc32.c</FilePath>
             </File>
             <File>
-              <FileName>gpio.c</FileName>
+              <FileName>boot_it.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Core/Src/gpio.c</FilePath>
+              <FilePath>../Bootloader/Src/boot_it.c</FilePath>
             </File>
             <File>
-              <FileName>adc.c</FileName>
+              <FileName>system_stm32h7xx.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Core/Src/adc.c</FilePath>
-            </File>
-            <File>
-              <FileName>dma.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/dma.c</FilePath>
-            </File>
-            <File>
-              <FileName>fdcan.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/fdcan.c</FilePath>
-            </File>
-            <File>
-              <FileName>tim.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/tim.c</FilePath>
-            </File>
-            <File>
-              <FileName>usart.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/usart.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_it.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/stm32h7xx_it.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_msp.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/stm32h7xx_hal_msp.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_timebase_tim.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/stm32h7xx_hal_timebase_tim.c</FilePath>
-              <FileOption>
-                <CommonProperty>
-                  <UseCPPCompiler>2</UseCPPCompiler>
-                  <RVCTCodeConst>0</RVCTCodeConst>
-                  <RVCTZI>0</RVCTZI>
-                  <RVCTOtherData>0</RVCTOtherData>
-                  <ModuleSelection>0</ModuleSelection>
-                  <IncludeInBuild>1</IncludeInBuild>
-                  <AlwaysBuild>2</AlwaysBuild>
-                  <GenerateAssemblyFile>2</GenerateAssemblyFile>
-                  <AssembleAssemblyFile>2</AssembleAssemblyFile>
-                  <PublicsOnly>2</PublicsOnly>
-                  <StopOnExitCode>11</StopOnExitCode>
-                  <CustomArgument></CustomArgument>
-                  <IncludeLibraryModules></IncludeLibraryModules>
-                  <ComprImg>1</ComprImg>
-                </CommonProperty>
-                <FileArmAds>
-                  <Cads>
-                    <interw>2</interw>
-                    <Optim>0</Optim>
-                    <oTime>2</oTime>
-                    <SplitLS>2</SplitLS>
-                    <OneElfS>2</OneElfS>
-                    <Strict>2</Strict>
-                    <EnumInt>2</EnumInt>
-                    <PlainCh>2</PlainCh>
-                    <Ropi>2</Ropi>
-                    <Rwpi>2</Rwpi>
-                    <wLevel>0</wLevel>
-                    <uThumb>2</uThumb>
-                    <uSurpInc>2</uSurpInc>
-                    <uC99>2</uC99>
-                    <uGnu>2</uGnu>
-                    <useXO>2</useXO>
-                    <v6Lang>0</v6Lang>
-                    <v6LangP>0</v6LangP>
-                    <vShortEn>2</vShortEn>
-                    <vShortWch>2</vShortWch>
-                    <v6Lto>2</v6Lto>
-                    <v6WtE>2</v6WtE>
-                    <v6Rtti>2</v6Rtti>
-                    <VariousControls>
-                      <MiscControls></MiscControls>
-                      <Define></Define>
-                      <Undefine></Undefine>
-                      <IncludePath></IncludePath>
-                    </VariousControls>
-                  </Cads>
-                </FileArmAds>
-              </FileOption>
-            </File>
-            <File>
-              <FileName>ota_app.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\Src\ota_app.c</FilePath>
+              <FilePath>../Core/Src/system_stm32h7xx.c</FilePath>
             </File>
           </Files>
         </Group>
         <Group>
-          <GroupName>Drivers/STM32H7xx_HAL_Driver</GroupName>
+          <GroupName>HAL</GroupName>
           <Files>
             <File>
-              <FileName>stm32h7xx_hal_tim.c</FileName>
+              <FileName>stm32h7xx_hal.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim.c</FilePath>
+              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal.c</FilePath>
             </File>
             <File>
-              <FileName>stm32h7xx_hal_tim_ex.c</FileName>
+              <FileName>stm32h7xx_hal_cortex.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim_ex.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_adc.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_adc.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_adc_ex.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_adc_ex.c</FilePath>
+              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_cortex.c</FilePath>
             </File>
             <File>
               <FileName>stm32h7xx_hal_rcc.c</FileName>
@@ -551,6 +450,31 @@
               <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc_ex.c</FilePath>
             </File>
             <File>
+              <FileName>stm32h7xx_hal_pwr.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32h7xx_hal_pwr_ex.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr_ex.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32h7xx_hal_gpio.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_gpio.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32h7xx_hal_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32h7xx_hal_uart_ex.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart_ex.c</FilePath>
+            </File>
+            <File>
               <FileName>stm32h7xx_hal_flash.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_flash.c</FilePath>
@@ -559,16 +483,6 @@
               <FileName>stm32h7xx_hal_flash_ex.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_flash_ex.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_gpio.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_gpio.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_hsem.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_hsem.c</FilePath>
             </File>
             <File>
               <FileName>stm32h7xx_hal_dma.c</FileName>
@@ -586,189 +500,16 @@
               <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_mdma.c</FilePath>
             </File>
             <File>
-              <FileName>stm32h7xx_hal_pwr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_pwr_ex.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr_ex.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_cortex.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_cortex.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_i2c.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_i2c_ex.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c_ex.c</FilePath>
-            </File>
-            <File>
               <FileName>stm32h7xx_hal_exti.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_exti.c</FilePath>
             </File>
             <File>
-              <FileName>stm32h7xx_hal_fdcan.c</FileName>
+              <FileName>stm32h7xx_hal_hsem.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_fdcan.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_uart.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32h7xx_hal_uart_ex.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart_ex.c</FilePath>
+              <FilePath>../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_hsem.c</FilePath>
             </File>
           </Files>
-        </Group>
-        <Group>
-          <GroupName>Drivers/CMSIS</GroupName>
-          <Files>
-            <File>
-              <FileName>system_stm32h7xx.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/system_stm32h7xx.c</FilePath>
-            </File>
-          </Files>
-        </Group>
-        <Group>
-          <GroupName>foc</GroupName>
-          <Files>
-            <File>
-              <FileName>foc_api.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\foc_api.c</FilePath>
-            </File>
-            <File>
-              <FileName>foc_bsp.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\foc_bsp.c</FilePath>
-            </File>
-            <File>
-              <FileName>foc_controller.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\foc_controller.c</FilePath>
-            </File>
-            <File>
-              <FileName>foc_current_loop.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\foc_current_loop.c</FilePath>
-            </File>
-            <File>
-              <FileName>foc_data.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\foc_data.c</FilePath>
-            </File>
-            <File>
-              <FileName>foc_kernel.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\foc_kernel.c</FilePath>
-            </File>
-            <File>
-              <FileName>encoder_calc.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\encoder_calc.c</FilePath>
-            </File>
-            <File>
-              <FileName>foc_position_loop.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\foc_position_loop.c</FilePath>
-            </File>
-            <File>
-              <FileName>foc_speed_loop.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\foc_speed_loop.c</FilePath>
-            </File>
-            <File>
-              <FileName>foc_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\foc_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>func_errMes.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\func_errMes.c</FilePath>
-            </File>
-            <File>
-              <FileName>func_filter.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\func_filter.c</FilePath>
-            </File>
-            <File>
-              <FileName>func_pid.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\func_pid.c</FilePath>
-            </File>
-            <File>
-              <FileName>func_subprogram.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\func_subprogram.c</FilePath>
-            </File>
-            <File>
-              <FileName>func_trigonometric.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\func_trigonometric.c</FilePath>
-            </File>
-            <File>
-              <FileName>sei.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_fast\sei.c</FilePath>
-            </File>
-            <File>
-              <FileName>ifly_fault.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_app\ifly_fault.c</FilePath>
-            </File>
-            <File>
-              <FileName>ifly_fault_api.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_app\ifly_fault_api.c</FilePath>
-            </File>
-            <File>
-              <FileName>ifly_flux_ident.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_app\ifly_flux_ident.c</FilePath>
-            </File>
-            <File>
-              <FileName>ifly_inertia_ident.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_app\ifly_inertia_ident.c</FilePath>
-            </File>
-            <File>
-              <FileName>ifly_led.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_app\ifly_led.c</FilePath>
-            </File>
-            <File>
-              <FileName>ifly_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_app\ifly_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>phase_resistance_ident.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\foc\foc_app\phase_resistance_ident.c</FilePath>
-            </File>
-          </Files>
-        </Group>
-        <Group>
-          <GroupName>::CMSIS</GroupName>
         </Group>
       </Groups>
     </Target>
@@ -776,14 +517,7 @@
 
   <RTE>
     <apis/>
-    <components>
-      <component Cclass="CMSIS" Cgroup="CORE" Cvendor="ARM" Cversion="6.2.0" condition="ARMv6_7_8-M Device" ymlID="CMSIS:CORE">
-        <package name="CMSIS" schemaVersion="1.7.53" url="https://www.keil.com/pack/" vendor="ARM" version="6.3.0"/>
-        <targetInfos>
-          <targetInfo name="cubemx_yxsui"/>
-        </targetInfos>
-      </component>
-    </components>
+    <components/>
     <files/>
   </RTE>
 

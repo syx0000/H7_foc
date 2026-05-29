@@ -79,6 +79,22 @@ class SerialWorker(QThread):
         finally:
             self._mutex.unlock()
 
+    def send_bytes(self, data: bytes):
+        """Send raw bytes (thread-safe), no \\r\\n appended.
+
+        Used for OTA binary data frames. Bypasses the ASCII conversion in
+        send() so 0x00 / 0x0A / 0x0D pass through untouched.
+        """
+        self._mutex.lock()
+        try:
+            if self._port and self._port.is_open:
+                self._port.write(data)
+                self._port.flush()
+        except Exception as e:
+            self.sig_error.emit(f"Send error: {e}")
+        finally:
+            self._mutex.unlock()
+
     def run(self):
         """Main thread loop: read bytes, split on \\n, emit lines."""
         while self._running:

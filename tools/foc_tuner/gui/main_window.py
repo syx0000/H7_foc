@@ -66,7 +66,7 @@ class MainWindow(QMainWindow):
         self._fault_panel = FaultPanel()
         left_tabs.addTab(self._fault_panel, "Faults")
 
-        self._maint_panel = MaintenancePanel()
+        self._maint_panel = MaintenancePanel(self._serial)
         left_tabs.addTab(self._maint_panel, "Maintenance")
 
         left_split.addWidget(left_tabs)

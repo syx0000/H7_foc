@@ -209,3 +209,100 @@ def build_query_params() -> str:
         Command string "getparams"
     """
     return "getparams"
+
+
+# ============================================================================
+# OTA firmware upgrade protocol
+# ============================================================================
+#
+# Wire format:
+#   Control frames (text, '\r\n' terminated):
+#     otabegin SIZE=<n> CRC=0x<hex> VER=<v>     -- start, MCU erases App-B
+#     OTA_READY chunk=256                        -- MCU ack, ready to receive
+#     otaend                                    -- finalize, MCU verifies + writes header
+#     OTA_DONE / OTA_FAIL <reason>              -- final result
+#     otaabort                                  -- cancel + clear App-B header
+#     OTA_ACK <seq> / OTA_NAK <seq> <reason>    -- per-chunk ack
+#     OTA_ERR <reason>                          -- generic error
+#
+#   Data frames (binary, fixed header):
+#     'OD' (2)  + seq:u16 LE + len:u16 LE + payload(len bytes) + crc16:u16 LE
+#     CRC16 is MODBUS (poly=0xA001 reflected, init=0xFFFF, no xorOut),
+#     covers header + payload (everything before the trailing CRC).
+#
+# Why 256B payload: USART1 RX DMA buffer on the MCU is 128B and is reused
+# every IDLE event; in OTA mode the RX ISR streams bytes directly into a
+# separate ring buffer, but keeping chunks small bounds re-transmit cost
+# and matches an integer multiple of the H7 32B Flash write granularity.
+
+_OTA_CHUNK_SIZE = 256
+
+
+def build_ota_begin(size: int, crc32: int, version: str = "1.0.0") -> str:
+    """Begin an OTA session.
+
+    Args:
+        size: Firmware byte count (must fit in App-B slot)
+        crc32: IEEE 802.3 CRC32 of the entire firmware (matches Flash_Crc32)
+        version: Free-form version string, no spaces
+
+    Returns:
+        Command string for the begin frame
+    """
+    return f"otabegin SIZE={size} CRC=0x{crc32:08X} VER={version}"
+
+
+def build_ota_end() -> str:
+    """Finalize OTA session — MCU verifies whole-image CRC and writes header."""
+    return "otaend"
+
+
+def build_ota_abort() -> str:
+    """Abort OTA session — MCU clears App-B header to mark slot invalid."""
+    return "otaabort"
+
+
+def build_ota_swap() -> str:
+    """Reboot into bootloader so it can swap to the newly written slot."""
+    return "otaswap"
+
+
+def crc16_modbus(data: bytes) -> int:
+    """CRC16-MODBUS (poly=0xA001 reflected, init=0xFFFF, no xorOut).
+
+    Verified against the standard test vector b'123456789' -> 0x4B37.
+    """
+    crc = 0xFFFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            if crc & 1:
+                crc = (crc >> 1) ^ 0xA001
+            else:
+                crc >>= 1
+    return crc & 0xFFFF
+
+
+def build_ota_data_frame(seq: int, payload: bytes) -> bytes:
+    """Build a binary OTA data frame.
+
+    Frame layout (little-endian):
+        offset  size  field
+        0       2     'OD' magic
+        2       2     seq
+        4       2     len (== len(payload))
+        6       len   payload
+        6+len   2     crc16 over bytes [0 .. 6+len)
+    """
+    if len(payload) > _OTA_CHUNK_SIZE:
+        raise ValueError(f"payload {len(payload)} > chunk size {_OTA_CHUNK_SIZE}")
+    import struct
+    header = b'OD' + struct.pack('<HH', seq & 0xFFFF, len(payload))
+    body = header + payload
+    crc = crc16_modbus(body)
+    return body + struct.pack('<H', crc)
+
+
+def get_ota_chunk_size() -> int:
+    """Return the negotiated OTA payload size."""
+    return _OTA_CHUNK_SIZE
