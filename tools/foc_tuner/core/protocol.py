@@ -76,12 +76,12 @@ def build_runcmd(cmd: int, mode: int, target: float) -> str:
     Args:
         cmd: Command (0=stop, 2=run)
         mode: Control mode (1=position, 3=velocity, 4=torque, 8=CSP, 9=CSV, 10=CST)
-        target: Target value (position in °, velocity in rpm, torque in A)
+        target: Target value (position in °, velocity in rpm, torque in Nm)
 
     Returns:
-        Command string (e.g., "Runcmd2M3tar20")
+        Command string (e.g., "Runcmd2M3tar20.5")
     """
-    return f"Runcmd{cmd}M{mode}tar{int(target)}"
+    return f"Runcmd{cmd}M{mode}tar{target}"
 
 
 def build_enable(enable: bool) -> str:

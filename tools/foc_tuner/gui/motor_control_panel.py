@@ -44,8 +44,8 @@ class MotorControlPanel(QWidget):
         target_layout.addWidget(QLabel("Target:"))
         self._target_spin = QDoubleSpinBox()
         self._target_spin.setRange(0, 10000)
-        self._target_spin.setDecimals(1)
-        self._target_spin.setSuffix(" (°/rpm/A)")
+        self._target_spin.setDecimals(2)
+        self._target_spin.setSuffix(" (°/rpm/Nm)")
         target_layout.addWidget(self._target_spin)
 
         self._reverse_cb = QCheckBox("Reverse")

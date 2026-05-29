@@ -383,9 +383,10 @@ void dbg_cmd_set(void) {
         loc                             = strstr((char *)dbgRecvBuf, "M");
         token                           = strtok(loc, "M");
         int mode_val                    = atoi(token);
-        loc                             = strstr((char *)dbgRecvBuf, "tar");
-        token                           = strtok(loc, "tar");
-        int32_t Data                    = atoi(token);
+
+        /* tar 参数统一用浮点解析，避免 strtok 破坏字符串 */
+        char *tar_str = strstr((char *)dbgRecvBuf, "tar");
+        float tar_value = (tar_str != NULL) ? atof(tar_str + 3) : 0.0f;
 
         /* cmd=0 视为停机命令, 走主动刹车流程, 不直接 foc_run=0 (会让 PWM 卡死在上次 CCR) */
         if (cmd_val == 0) {
@@ -417,8 +418,7 @@ void dbg_cmd_set(void) {
         if (controller_eyou.controller_mode == PROFILE_TORQUE_MODE ||
             controller_eyou.controller_mode == CYCLIC_SYNC_TORQUE_MODE) {
             /* tar 字段语义: N·m (输出端扭矩), 经 Kt LUT 反查到 q 轴电流 Q10 */
-            char *tar_str = strstr((char *)dbgRecvBuf, "tar");
-            float tq_nm = (tar_str != NULL) ? atof(tar_str + 3) : 0.0f;
+            float tq_nm = tar_value;
             int32_t iq = (int32_t)(can_wly_Nm_to_iA(tq_nm) * 1024.0f);
             int32_t max_cur = (int32_t)controller_eyou.FlashData.MaxCurrent;
             if (iq >  max_cur) { iq =  max_cur; printf("  iq cmd clamped to +%d\r\n", max_cur); }
@@ -426,21 +426,36 @@ void dbg_cmd_set(void) {
             controller_eyou.I_q_ref = iq;
             controller_eyou.velocity_ref = 0;
             printf("  tar=%.3f Nm -> Iq=%ld Q10\r\n", tq_nm, (long)iq);
+            printf("run mod_Target: %d, %.3f Nm\r\n", controller_eyou.controller_mode, tq_nm);
         } else if (controller_eyou.controller_mode == PROFILE_VELOCITY_MOCE ||
                    controller_eyou.controller_mode == CYCLIC_SYNC_VELOCITY_MODE) {
-            controller_eyou.velocity_ref = Data * 1024 * 25;
+            float vel_rpm = tar_value;
+            controller_eyou.velocity_ref = (int32_t)(vel_rpm * 1024.0f * 25.0f);
+            printf("run mod_Target: %d, %.2f rpm\r\n", controller_eyou.controller_mode, vel_rpm);
         } else if (controller_eyou.controller_mode == PROFILE_POSITION_MODE ||
                    controller_eyou.controller_mode == CYCLIC_SYNC_POSITION_MODE) {
-            int32_t p_ref = Data * 1024;
+            float pos_deg = tar_value;
+            int32_t p_ref = (int32_t)(pos_deg * 1024.0f);
             if (controller_eyou.FlashData.PositionLimitFlag == 50) {
                 int32_t pmax = controller_eyou.FlashData.MaxPositionLimit;
                 int32_t pmin = controller_eyou.FlashData.MinPositionLimit;
-                if (p_ref > pmax) { p_ref = pmax; printf("  pos cmd clamped to MaxPos=%ld\r\n", (long)pmax); }
-                else if (p_ref < pmin) { p_ref = pmin; printf("  pos cmd clamped to MinPos=%ld\r\n", (long)pmin); }
+                float pmax_deg = pmax / 1024.0f;
+                float pmin_deg = pmin / 1024.0f;
+                if (pos_deg > pmax_deg) {
+                    p_ref = pmax;
+                    pos_deg = pmax_deg;
+                    printf("  pos cmd clamped to MaxPos=%.2f deg\r\n", pmax_deg);
+                } else if (pos_deg < pmin_deg) {
+                    p_ref = pmin;
+                    pos_deg = pmin_deg;
+                    printf("  pos cmd clamped to MinPos=%.2f deg\r\n", pmin_deg);
+                }
             }
             controller_eyou.position_ref = p_ref;
+            printf("run mod_Target: %d, %.2f deg\r\n", controller_eyou.controller_mode, pos_deg);
+        } else {
+            printf("run mod_Target: %d, %.2f\r\n", controller_eyou.controller_mode, tar_value);
         }
-        printf("run mod_Target: %d, %d\r\n", controller_eyou.controller_mode, Data);
     }
 
     /* enable<0/1>: PWM 使能/失能控制
