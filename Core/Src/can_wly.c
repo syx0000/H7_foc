@@ -102,10 +102,11 @@ static float pos_int_to_rad(int32_t pos_out) {
 static int32_t pos_rad_to_int(float rad) {
     return (int32_t)(rad / DEG_TO_RAD * 1024.0f);
 }
-/* 速度: dtheta_mech_out (输出端 rpm*1024, 不含GR) -> rad/s (反馈路径) */
-static float vel_out_to_rad_s(int32_t vel_out) {
-    float rpm_out = (float)vel_out / 1024.0f;
-    return rpm_out * RPM_TO_RAD_S;
+/* 速度: dtheta_mech (电机端 rpm*1024*GR) -> rad/s 输出端 (反馈路径)
+   不再使用 dtheta_mech_out, 改用电机端折算避免负载端编码器低频抖动 */
+static float vel_motor_to_load_rad_s(int32_t dtheta_motor) {
+    float rpm_load = (float)dtheta_motor / (1024.0f * CAN_WLY_GR);
+    return rpm_load * RPM_TO_RAD_S;
 }
 /* 速度: 输出端 rad/s -> velocity_ref (rpm*1024*GR) (指令路径) */
 static int32_t vel_rad_s_to_int(float rad_s) {
@@ -197,7 +198,7 @@ static int32_t tq_nm_to_iq(float nm) {
  */
 static void pack_status_frame(uint8_t *d) {
     float pos_rad = pos_int_to_rad(controller_eyou.real_position_out);
-    float vel_rad_s = vel_out_to_rad_s(controller_eyou.dtheta_mech_out);
+    float vel_rad_s = vel_motor_to_load_rad_s(controller_eyou.dtheta_mech);
     float tq_nm = tq_iq_to_nm(controller_eyou.I_q);
 
     uint32_t p_int = float_to_uint(pos_rad, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
@@ -260,8 +261,9 @@ static void send_ext_status_frame(void) {
     if (iq_abs < 0) iq_abs = -iq_abs;
     uint16_t i_rms_100 = (uint16_t)((iq_abs * 100) / 1024);
 
-    /* 速度: dtheta_mech_out (输出端 rpm×1024) → 0.1 输出端 rpm */
-    int16_t v_int = (int16_t)((controller_eyou.dtheta_mech_out * 10) / 1024);
+    /* 速度: dtheta_mech (电机端 rpm*1024*GR) → 0.1 输出端 rpm
+       (折算: rpm*1024*GR / (1024*GR) * 10 = *10/(1024*GR)) */
+    int16_t v_int = (int16_t)((controller_eyou.dtheta_mech * 10) / ((int32_t)(1024 * CAN_WLY_GR)));
 
     /* 位置: real_position_out (1°/1024) → 0.001° */
     int32_t p_int = (int32_t)(((int64_t)controller_eyou.real_position_out * 1000) / 1024);

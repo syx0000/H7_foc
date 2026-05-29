@@ -12,7 +12,7 @@
 
 | # | 文件:行 | 问题 | 影响 | 状态 |
 |---|---------|------|------|------|
-| 1 | `can_wly.c` `vel_int_to_rad_s` | 反馈路径误用指令路径换算，多除 GR=25 | 速度反馈缩小 25× | ✅ 已修（拆 `vel_out_to_rad_s`）|
+| 1 | `can_wly.c` `vel_int_to_rad_s` | 反馈路径误用指令路径换算，多除 GR=25 | 速度反馈缩小 25× | ✅ 已修（拆 `vel_out_to_rad_s` → 后改为 `vel_motor_to_load_rad_s`，直接用 dtheta_mech/GR）|
 | 2 | `can_wly.c can_wly_tick_1ms` | `CommunicateErr` 一旦置位不自愈 | 需手动 `0x701 FD` 清 | ✅ 确认为安全设计（主站必须显式清错+重新使能）|
 | 3 | `can_wly.c sdo_write_value` & `foc_api.c:514` | `temp1` 被 Rs 和 node_id 共用 | bwtest3 后 ID 丢失 | ✅ 已修（node_id 移到 temp4）|
 | 4 | `can_wly.c handle_mit_cmd` | MIT 的 Kp/Kd/Vel 全部丢弃 | 不符合 V1.7 完整语义 | ✅ 已修（MIT_PD_MODE 完整 PD 运算）|

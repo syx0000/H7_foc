@@ -110,8 +110,8 @@ def _parse_speed(line: str) -> ParsedFrame | None:
             'vel_ref': vals[0],           # rpm (already /1024 in firmware)
             'vel_ref_filt': vals[1],      # rpm
             'dtheta_mech': vals[2],       # rpm (motor end)
-            'dtheta_mech_out': vals[3],   # rpm (output end)
-            'vel_diff': vals[4],          # rpm
+            'dtheta_mech_load_eq': vals[3],   # rpm (motor end /GR, 等效负载端)
+            'vel_diff': vals[4],          # rpm (vel_ref - dtheta_mech)
         }
     )
 
@@ -268,7 +268,7 @@ def get_channel_names(logid: int) -> list[str]:
         10: ['now_mechposition', 'theta_elec', 'real_position_out', 'real_position', 'dtheta_mech_rpm'],
         30: ['V_q', 'V_d'],
         40: ['I_q', 'I_d', 'V_q', 'V_d', 'I_q_ref', 'I_d_ref', 'I_q_ref_filt'],
-        50: ['vel_ref', 'vel_ref_filt', 'dtheta_mech', 'dtheta_mech_out', 'vel_diff'],
+        50: ['vel_ref', 'vel_ref_filt', 'dtheta_mech', 'dtheta_mech_load_eq', 'vel_diff'],
         60: ['CCR2', 'CCR3', 'CCR4'],
         70: ['CCR2', 'CCR3', 'CCR4', 'I_a', 'I_b', 'I_c'],
         90: ['Ia_raw', 'Ib_raw', 'Ic_raw'],

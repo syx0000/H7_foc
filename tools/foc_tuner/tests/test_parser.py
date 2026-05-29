@@ -29,7 +29,7 @@ def test_parse_speed():
     assert frame.fields['vel_ref'] == 100
     assert frame.fields['vel_ref_filt'] == 98
     assert frame.fields['dtheta_mech'] == 2500
-    assert frame.fields['dtheta_mech_out'] == 100
+    assert frame.fields['dtheta_mech_load_eq'] == 100
 
 
 def test_parse_position():

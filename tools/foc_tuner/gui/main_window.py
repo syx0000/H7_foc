@@ -115,6 +115,7 @@ class MainWindow(QMainWindow):
         self._flash_panel.sig_command.connect(self._serial.send)
         self._fault_panel.sig_command.connect(self._serial.send)
         self._maint_panel.sig_command.connect(self._serial.send)
+        self._console.sig_send_command.connect(self._serial.send)
 
         # Disabled until serial connects
         self._control_panel.setEnabled(False)
@@ -162,6 +163,7 @@ class MainWindow(QMainWindow):
         self._flash_panel.setEnabled(connected)
         self._fault_panel.setEnabled(connected)
         self._maint_panel.setEnabled(connected)
+        self._console.set_send_enabled(connected)
 
         if connected:
             self._console.append_line("=== Connected ===")

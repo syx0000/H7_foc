@@ -656,9 +656,9 @@ void dbg_cmd_set(void) {
         }
         case 3: {
             /* 直接调 pack_status_frame 打印 12 字节 → 验证速度刻度疑点 */
-            printf("  Current state: pos_out=%d, dtheta_mech_out=%d, I_q=%d\r\n",
+            printf("  Current state: pos_out=%d, dtheta_mech_out_eq=%d, I_q=%d\r\n",
                    (int)controller_eyou.real_position_out,
-                   (int)controller_eyou.dtheta_mech_out,
+                   (int)(controller_eyou.dtheta_mech / 25),
                    (int)controller_eyou.I_q);
             /* 触发状态帧发送 (stub 模式会打印 hex) */
             fdcan_rx_user(0x080, NULL, 0);
@@ -1092,12 +1092,14 @@ void dbg_log_print(void) {
                controller_eyou.I_q_ref_filterd);
         break;
     case 50:
+        /* 列1=指令(rpm), 列2=斜坡后指令(rpm), 列3=电机端速度(rpm),
+           列4=电机端折算到载端(rpm, =列3/25), 列5=指令-反馈(rpm) */
         printf("speed: %d, %d, %d, %d, %d\r\n",
                controller_eyou.velocity_ref / 1024,
                controller_eyou.velocity_ref_filterd / 1024,
                controller_eyou.dtheta_mech / 1024,
-               controller_eyou.dtheta_mech_out / 1024,
-               controller_eyou.dtheta_mech / 1024 - controller_eyou.dtheta_mech_out * 25 / 1024);
+               (controller_eyou.dtheta_mech / 1024) / 25,
+               (controller_eyou.velocity_ref - controller_eyou.dtheta_mech) / 1024);
         break;
     case 60:
         printf("%d, %d, %d\r\n", controller_eyou.CCR2, controller_eyou.CCR3, controller_eyou.CCR4);
@@ -1523,10 +1525,10 @@ void dbg_log_print(void) {
         int32_t pos_out_max  = c->IncPID_Position.OutputMax;
         int sat_pos          = (pos_out >=  pos_out_max - 1) ? 1
                              : (pos_out <= -pos_out_max + 1) ? -1 : 0;
-        printf("[L200/6] MaxSpd=%ld(load Q10) OverI=%u(Q10) OverUdc=%u(0.1V) | PosRef=%ld PosOut=%ld dPosOut=%ld(Q10rpm) | PosPID out=%ld/%ld sat=%d\r\n",
+        printf("[L200/6] MaxSpd=%ld(load Q10) OverI=%u(Q10) OverUdc=%u(0.1V) | PosRef=%ld PosOut=%ld dPosOut_eq=%ld(Q10rpm) | PosPID out=%ld/%ld sat=%d\r\n",
                (long)c->FlashData.MaxSpeed,
                (unsigned)Threshold.OverCurrent, (unsigned)Threshold.OverUdc,
-               (long)c->position_ref, (long)c->real_position_out, (long)c->dtheta_mech_out,
+               (long)c->position_ref, (long)c->real_position_out, (long)(c->dtheta_mech / 25),
                (long)pos_out, (long)pos_out_max, sat_pos);
         break;
     }

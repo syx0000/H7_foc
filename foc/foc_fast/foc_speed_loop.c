@@ -24,7 +24,8 @@ extern ifly_Err_Pro_Type motorProValue;
 void foc_velocity_close_loop(ControllerStruct* controller) {
   /* MIT PD 模式直接算 Iq, 跳过斜坡和速度 PID */
   if (controller->controller_mode == MIT_PD_MODE) {
-    float vel_raw = (float)controller->dtheta_mech_out / 1024.0f *
+    /* 用电机端速度 dtheta_mech 折算到负载端 (rpm)，避免负载端编码器低频抖动 */
+    float vel_raw = (float)controller->dtheta_mech / (1024.0f * FOC_GEAR_RATIO) *
                     (2.0f * 3.14159265f / 60.0f);
     if (!controller->mit_active) {
       controller->mit_vel_filt = vel_raw;

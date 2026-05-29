@@ -165,7 +165,6 @@ void Encoder_out_data_Calculate(ControllerStruct* controller, uint16_t hz) {
         controller->real_position_out_pre =
             (int32_t)(((uint64_t)temp * 360) >> ENCODER_10BIT_DIV);
         controller->real_position_out = controller->real_position_out_pre;
-        controller->old_angle_count_out_raw = temp_raw;
         out_first_run = 0;
         return;
     }
@@ -197,14 +196,11 @@ void Encoder_out_data_Calculate(ControllerStruct* controller, uint16_t hz) {
         jump_cnt = 0;
     }
 
-    /* 速度：(real_position_out - pre) * hz / 6   (/6 = *60/360)
-       结果单位：输出端 rpm × 1024 */
-    controller->dtheta_mech_out =
-        (controller->real_position_out - controller->real_position_out_pre) * hz / 6;
+    /* 速度不再独立计算，使用电机端 dtheta_mech / FOC_GEAR_RATIO 折算
+       负载端编码器低频抖动导致原速度信号波动大，且电机端折算精度足够 */
 
     controller->real_position_out_pre = controller->real_position_out;
     controller->old_angle_count_out = temp;
-    controller->old_angle_count_out_raw = temp_raw;
 }
 
 /*******************************************************************************

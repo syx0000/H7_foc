@@ -54,7 +54,7 @@ Day 4~5 (2026-05-11)
 - `Core/Src/encoder.c`: 阻塞 + DMA 两套 API，CRC-8 校验，TIM1 CC4 中断异步触发
 - `foc/foc_fast/encoder_calc.c`: **新增** 移植自 PHU 的定点计算
   - `Encoder_data_Calculate`: 电机端（outer_raw）→ theta_elec / real_position / dtheta_mech
-  - `Encoder_out_data_Calculate`: 输出端（inner_raw）→ real_position_out / dtheta_mech_out
+  - `Encoder_out_data_Calculate`: 输出端（inner_raw）→ real_position_out（仅位置，速度已改用电机端折算）
   - `Encoder_out_data_Reset`: 开机零位初始化
 
 **关键修复（本次开发）**

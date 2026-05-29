@@ -496,8 +496,7 @@ typedef struct {
   int32_t old_mechposition;                      // 上一次的机械位置
   int32_t now_mechposition;                      // 当前机械位置
 
-  int32_t dtheta_mech;                           // 转子机械角速度，单位1rpm/1024
-  int32_t dtheta_mech_out;
+  int32_t dtheta_mech;                           // 转子机械角速度，单位1rpm/1024 (电机端)
   int32_t velocity_ref;                          // 速度参考值
   int32_t velocity_ref_filterd;                  // 滤波后的速度参考值
   /* feedforward term computed from position error (same units as velocity_ref) */
@@ -514,7 +513,7 @@ typedef struct {
   __IO int32_t circle_count_out;                 // 选择物理圈数计数
   uint32_t old_angle_count;                      // 上一次循环角度值
   __IO uint32_t old_angle_count_out;             // 上一次循环角度值
-  __IO uint32_t old_angle_count_out_raw;         // 上一次循环角度原始值
+  __IO uint32_t old_angle_count_out_raw;         // (已废弃, 保留字段兼容)
 
   int32_t real_position;                         // 减去偏差之后的实际位置，
   int32_t real_position_out;                     // 输出端编码器值

@@ -40,7 +40,8 @@
 ### 单位约定
 - **位置** (`real_position_out` / `position_ref`): 输出端 1°/1024 LSB
 - **速度** (`velocity_ref` / `velocity_ref_filterd`): 载端 rpm × 1024 × 25 (内部含减速比)
-- **电机端速度** (`dtheta_mech`): 电机端 rpm × 1024
+- **电机端速度** (`dtheta_mech`): 电机端 rpm × 1024 (= 载端 rpm × 1024 × 25)
+- **载端等效速度**: `dtheta_mech / FOC_GEAR_RATIO`（不再独立用 inner_raw 算速度，避免负载端编码器低频抖动）
 - **电流** (`I_q` / `I_d` / `I_q_ref`): Q10 A (1024 = 1A)
 - **电压** (`V_q` / `V_d`): Q10 V (1024 = 1V)
 
@@ -67,7 +68,7 @@
 读raw_a/raw_b
  → 更新g_foc_current统计
  → Encoder_data_Calculate        电机端 (theta_elec / dtheta_mech / real_position)
- → Encoder_out_data_Calculate    输出端 (real_position_out / dtheta_mech_out)
+ → Encoder_out_data_Calculate    输出端 (real_position_out 仅位置, 不再算速度)
  → phase_current_sample          独立相电流处理（raw→I_a/I_b/I_c）
  → MC_Loop_Schedule:
    - 位置环 (2.5kHz, /POSITION_CALCULATE_DIV=4)
@@ -466,7 +467,22 @@ extern volatile uint32_t g_adc_isr_cycles_max;   // ADC ISR 历史最大耗时
 
 - **分支**: main
 - **用户**: syx0000
-- **最近主要工作**: 故障保护层 + CAN 万里扬 V1.7 协议从站 + BEMF 前馈 + 过调制对策 + cantest 单元自测（含 0x500 MIT 12B 帧 19 个 case）
+- **最近主要工作**: 故障保护层 + CAN 万里扬 V1.7 协议从站 + BEMF 前馈 + 过调制对策 + cantest 单元自测（含 0x500 MIT 12B 帧 19 个 case） + **dtheta_mech_out 改用电机端折算（消除负载端编码器低频抖动）**
+
+## 历史变更
+
+### 2026-05-29: 取消 dtheta_mech_out 独立计算
+**问题**: `Encoder_out_data_Calculate` 使用 inner_raw 24-bit 差分 + 16 阶 MA 滤波算负载端速度。实测稳态 500 rpm 工况下，负载端速度抖动 ±5 rpm（电机端只 ±1.5 rpm，按 25:1 折算应在 ±0.06 rpm），主导频率 10-30Hz，源自负载端编码器偏心 / 减速器传动误差等机械低频噪声，16 阶 MA（截止 625Hz）压不住。
+
+**改动**: 拿掉 inner_raw 速度差分和 MA 滤波；所有使用 `dtheta_mech_out` 的位置改用 `dtheta_mech / FOC_GEAR_RATIO` 折算：
+- `foc_speed_loop.c` MIT 反馈
+- `can_wly.c` MIT 状态帧 (`vel_motor_to_load_rad_s`) + 万里扬状态帧 (0.1 输出端 rpm)
+- `foc_bsp.c` 调试 printf x3
+- 删除 `Speed_Filter_out` / `dtheta_mech_out` / `dtheta_mech_out_raw` 三个字段
+
+**位置环不受影响**: `real_position_out` 仍由 inner_raw 计算（位置精度依赖负载端编码器）。
+
+**代价**: 控制环失去对"减速器输出端 → 电机轴"这段传动链上扭振的主动阻尼能力（KD 看不到扭振）。对刚性传动 / 编码器噪声为主场景为净收益；对柔性传动场景，需要把 MIT KD 调大或靠机械阻尼补偿。
 
 ## 相关文档
 
