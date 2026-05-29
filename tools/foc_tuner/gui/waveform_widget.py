@@ -1,6 +1,7 @@
 """Waveform widget for real-time scrolling plots.
 
 Uses pyqtgraph for high-performance time-series display.
+Supports dual-cursor measurement (click to place A/B, shows values + Δt).
 """
 
 import numpy as np
@@ -9,7 +10,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox,
     QLabel, QDoubleSpinBox, QFrame
 )
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QFont
 
 
 class WaveformWidget(QWidget):
@@ -88,6 +90,28 @@ class WaveformWidget(QWidget):
         self._plot_widget.addLegend()
         self._plot_widget.setMouseEnabled(x=True, y=True)
         layout.addWidget(self._plot_widget)
+
+        # Cursor measurement (A/B vertical lines)
+        self._cursor_state = 0  # 0=next click places A, 1=places B, 2=clears
+        self._cursor_a = pg.InfiniteLine(
+            pos=0, angle=90, movable=True,
+            pen=pg.mkPen(color=(200, 180, 0), width=1.5, style=Qt.DashLine))
+        self._cursor_b = pg.InfiniteLine(
+            pos=0, angle=90, movable=True,
+            pen=pg.mkPen(color=(0, 180, 200), width=1.5, style=Qt.DashLine))
+        self._cursor_a.setVisible(False)
+        self._cursor_b.setVisible(False)
+        self._plot_widget.addItem(self._cursor_a)
+        self._plot_widget.addItem(self._cursor_b)
+        self._cursor_a.sigPositionChanged.connect(self._update_cursor_label)
+        self._cursor_b.sigPositionChanged.connect(self._update_cursor_label)
+        self._plot_widget.scene().sigMouseClicked.connect(self._on_plot_clicked)
+
+        # Cursor info label
+        self._cursor_label = QLabel("")
+        self._cursor_label.setFont(QFont("Consolas", 9))
+        self._cursor_label.setStyleSheet("QLabel { color: #333; }")
+        layout.addWidget(self._cursor_label)
 
         # Refresh timer (30 Hz)
         self._timer = QTimer()
@@ -203,3 +227,92 @@ class WaveformWidget(QWidget):
         self._auto_y_cb.setChecked(True)
         self._plot_widget.setXRange(-self._window_sec, 0, padding=0)
         self._plot_widget.enableAutoRange(axis='y')
+
+    # ─── Cursor measurement ───────────────────────────────────────────
+
+    def _on_plot_clicked(self, event):
+        """Handle mouse click on plot: place cursor A, B, or clear."""
+        if event.button() == Qt.RightButton:
+            self._clear_cursors()
+            return
+        if event.button() != Qt.LeftButton:
+            return
+        vb = self._plot_widget.plotItem.vb
+        pos = vb.mapSceneToView(event.scenePos())
+        t_click = pos.x()
+
+        if self._cursor_state == 0:
+            self._cursor_a.setValue(t_click)
+            self._cursor_a.setVisible(True)
+            self._cursor_b.setVisible(False)
+            self._cursor_state = 1
+        elif self._cursor_state == 1:
+            self._cursor_b.setValue(t_click)
+            self._cursor_b.setVisible(True)
+            self._cursor_state = 2
+        else:
+            self._clear_cursors()
+            self._cursor_a.setValue(t_click)
+            self._cursor_a.setVisible(True)
+            self._cursor_state = 1
+
+        self._update_cursor_label()
+
+    def _clear_cursors(self):
+        """Hide both cursors and clear label."""
+        self._cursor_a.setVisible(False)
+        self._cursor_b.setVisible(False)
+        self._cursor_state = 0
+        self._cursor_label.setText("")
+
+    def _update_cursor_label(self):
+        """Update the cursor info label with values at cursor positions."""
+        if not self._cursor_a.isVisible():
+            self._cursor_label.setText("")
+            return
+
+        t_a = self._cursor_a.value()
+        vals_a = self._get_values_at_time(t_a)
+        parts = [f"A: t={t_a:.3f}s {self._fmt_vals(vals_a)}"]
+
+        if self._cursor_b.isVisible():
+            t_b = self._cursor_b.value()
+            vals_b = self._get_values_at_time(t_b)
+            dt = abs(t_b - t_a)
+            freq = 1.0 / dt if dt > 1e-6 else 0
+            parts.append(f"B: t={t_b:.3f}s {self._fmt_vals(vals_b)}")
+            parts.append(f"Δt={dt:.4f}s ({freq:.1f}Hz)")
+
+        self._cursor_label.setText("  |  ".join(parts))
+
+    def _get_values_at_time(self, t_rel: float) -> dict:
+        """Look up nearest sample value for each visible channel at t_rel."""
+        result = {}
+        t_now = None
+        for name in self._curves.keys():
+            t, y = self._data_model.get_channel(name)
+            if len(t) > 0:
+                t_now = t[-1]
+                break
+        if t_now is None:
+            return result
+
+        for name, curve in self._curves.items():
+            if not curve.isVisible():
+                continue
+            t, y = self._data_model.get_channel(name)
+            if len(t) == 0:
+                continue
+            t_rel_arr = t - t_now
+            idx = np.searchsorted(t_rel_arr, t_rel, side='left')
+            idx = np.clip(idx, 0, len(y) - 1)
+            result[name] = y[idx]
+        return result
+
+    @staticmethod
+    def _fmt_vals(vals: dict) -> str:
+        """Format channel values dict into compact string."""
+        if not vals:
+            return "[]"
+        items = [f"{k}={v:.1f}" for k, v in vals.items()]
+        return "[" + ", ".join(items) + "]"
