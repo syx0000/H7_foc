@@ -16,3 +16,8 @@ env/
 
 # Local config
 foc_tuner_config.json
+
+# PyInstaller
+build/
+dist/
+*.spec

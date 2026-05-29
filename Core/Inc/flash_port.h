@@ -29,4 +29,8 @@ HAL_StatusTypeDef Flash_WriteData(uint32_t addr, const void *data, uint32_t len)
 /* 从Flash读取数据（直接内存映射读取） */
 void Flash_ReadData(uint32_t addr, void *buf, uint32_t len);
 
+/* IEEE 802.3 标准 CRC32（init=0xFFFFFFFF, poly=0xEDB88320, reflected, xorOut=0xFFFFFFFF）
+   软件按位实现，对 ~200 字节耗时 ~10us @ 480MHz */
+uint32_t Flash_Crc32(const void *data, uint32_t len);
+
 #endif /* __FLASH_PORT_H__ */

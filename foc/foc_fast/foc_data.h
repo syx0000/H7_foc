@@ -69,5 +69,6 @@ int32_t get_position_loop_kd(void);
 int16_t set_max_torque(int16_t maxTorruqRef);
 int16_t get_max_torque(void);
 int16_t get_actual_torque(void);
+void SavePhaseCompToFlash(void);
 
 #endif

@@ -171,3 +171,41 @@ def build_reset() -> str:
         Command string "reset"
     """
     return "reset"
+
+
+def build_phase_comp(offset_pos: int, offset_neg: int, comp_pos: int, comp_neg: int) -> str:
+    """Build phase compensation commands (4 separate commands).
+
+    Args:
+        offset_pos: Forward rotation fixed angle offset (×0.1°)
+        offset_neg: Reverse rotation fixed angle offset (×0.1°)
+        comp_pos: Forward rotation speed-related compensation (×0.1)
+        comp_neg: Reverse rotation speed-related compensation (×0.1)
+
+    Returns:
+        Four command strings joined by newlines
+    """
+    return (f"offsetpos{offset_pos}\r\n"
+            f"offsetneg{offset_neg}\r\n"
+            f"comppos{comp_pos}\r\n"
+            f"compneg{comp_neg}")
+
+
+def build_save_phase_comp() -> str:
+    """Build command to save phase compensation parameters to Flash.
+
+    Returns:
+        Command string "savephasecomp"
+    """
+    return "savephasecomp"
+
+
+def build_query_params() -> str:
+    """Build command to query current PID + phase comp parameters.
+
+    Firmware responds with PARAMS_BEGIN ... PARAMS_END block.
+
+    Returns:
+        Command string "getparams"
+    """
+    return "getparams"

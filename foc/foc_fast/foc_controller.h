@@ -110,7 +110,7 @@ extern volatile uint8_t USART_CONTROL;
 #define FLASH_DATA_IS_UPDATA_FLAG 60
 #define ELEC_ANGLE_ESTIMATE_FAILED 70                          // 上一次电角度辨识失败
 #define MECH_OFFSET_ANGLE_IS_UPDATA_FLAG ((uint16_t)0x0064)    // 用户定义零点
-#define FLASH_STRUCT_VERSION 6                                // v6: PI_LIMIT 25V (12V 不够, 实测 PI 独扛时 V_q 撞顶)
+#define FLASH_STRUCT_VERSION 7                                // v7: PhaseCompFlag + temp5/temp6 移到末尾 (相位补偿持久化)
 
 #define LOCKED_MOTOR_CURRENT (75 * 1024)                       // 10A
 #define DE_LOCKED_CURRENT (LOCKED_MOTOR_CURRENT / 6)
@@ -453,8 +453,6 @@ typedef struct {
   uint16_t PositionLimitFlag;
   int32_t MaxPositionLimit;         // 单位0.1°
   int32_t MinPositionLimit;         // 单位0.1°
-  int32_t temp5;               // 预留成员5
-  int32_t temp6;               // 预留成员6
 
   uint16_t ProteckKeyFlag;          // 保护功能开关  00||FF为无 其余为有 运行设定，立即生效
   uint16_t Sto_1_protectKey;        // 10关 20开
@@ -468,9 +466,11 @@ typedef struct {
   uint16_t MotorParamFlag;          // 电机参数有效标志: 00||FF为无，其余为有（用 OFFEST_IS_CORRECTED_FLAG）
   uint16_t FluxIdentFlag;           // 磁链辨识有效标志
   uint16_t InertiaIdentFlag;        // 惯量辨识有效标志
-  uint16_t MotorParamReserved;      // 对齐占位
+  uint16_t PhaseCompFlag;           // 相位补偿有效标志 (原 MotorParamReserved)
   int32_t temp7;               // 预留成员7 (用于 psi_f)
   int32_t temp8;               // 预留成员8 (用于 J)
+  int32_t temp5;               // 预留成员5 (用于 theta_offset_pos/neg: low16/high16)
+  int32_t temp6;               // 预留成员6 (用于 theta_comp_pos/neg: low16/high16)
 
   uint32_t Crc;                      // Crc校验位
 } FlashSavedData;

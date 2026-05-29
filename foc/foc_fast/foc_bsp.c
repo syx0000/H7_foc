@@ -486,38 +486,67 @@ void dbg_cmd_set(void) {
         printf("CAN RX debug: %s\r\n", g_can_rx_debug ? "ON" : "OFF");
     }
 
-    /* offsetpos<N>: 设置正转固定角度偏置 (单位 ×0.1°, 例 400=40°) */
-    if (NULL != strstr((char *)dbgRecvBuf, "offsetpos")) {
-        loc = strstr((char *)dbgRecvBuf, "offsetpos");
-        token = strtok(loc, "offsetpos");
-        g_theta_offset_pos = (int16_t)atoi((char *)token);
+    /* offsetpos<N>: 设置正转固定角度偏置 (单位 ×0.1°, 例 400=40°)
+       注: 用 atoi(loc+len) 而不是 strtok, 避免破坏 buffer 影响后续命令解析
+       (上位机一次发 4 行 phase comp 命令时, strtok 会把后续命令首字母改成 \0) */
+    if (NULL != (loc = strstr((char *)dbgRecvBuf, "offsetpos"))) {
+        g_theta_offset_pos = (int16_t)atoi(loc + strlen("offsetpos"));
         printf("offset_pos=%d (×0.1°) = %.1f deg\r\n",
                g_theta_offset_pos, g_theta_offset_pos * 0.1f);
     }
 
     /* offsetneg<N>: 设置反转固定角度偏置 (单位 ×0.1°) */
-    if (NULL != strstr((char *)dbgRecvBuf, "offsetneg")) {
-        loc = strstr((char *)dbgRecvBuf, "offsetneg");
-        token = strtok(loc, "offsetneg");
-        g_theta_offset_neg = (int16_t)atoi((char *)token);
+    if (NULL != (loc = strstr((char *)dbgRecvBuf, "offsetneg"))) {
+        g_theta_offset_neg = (int16_t)atoi(loc + strlen("offsetneg"));
         printf("offset_neg=%d (×0.1°) = %.1f deg\r\n",
                g_theta_offset_neg, g_theta_offset_neg * 0.1f);
     }
 
     /* comppos<N>: 正转速度相关补偿系数 (×0.1 倍 dtheta) */
-    if (NULL != strstr((char *)dbgRecvBuf, "comppos")) {
-        loc = strstr((char *)dbgRecvBuf, "comppos");
-        token = strtok(loc, "comppos");
-        g_theta_comp_pos = (int16_t)atoi((char *)token);
+    if (NULL != (loc = strstr((char *)dbgRecvBuf, "comppos"))) {
+        g_theta_comp_pos = (int16_t)atoi(loc + strlen("comppos"));
         printf("comp_pos=%d (×0.1)\r\n", g_theta_comp_pos);
     }
 
     /* compneg<N>: 反转速度相关补偿系数 (×0.1 倍 dtheta) */
-    if (NULL != strstr((char *)dbgRecvBuf, "compneg")) {
-        loc = strstr((char *)dbgRecvBuf, "compneg");
-        token = strtok(loc, "compneg");
-        g_theta_comp_neg = (int16_t)atoi((char *)token);
+    if (NULL != (loc = strstr((char *)dbgRecvBuf, "compneg"))) {
+        g_theta_comp_neg = (int16_t)atoi(loc + strlen("compneg"));
         printf("comp_neg=%d (×0.1)\r\n", g_theta_comp_neg);
+    }
+
+    /* savephasecomp: 保存相位补偿参数到 Flash */
+    if (NULL != strstr((char *)dbgRecvBuf, "savephasecomp")) {
+        extern void SavePhaseCompToFlash(void);
+        SavePhaseCompToFlash();
+    }
+
+    /* getparams: 查询所有 PID + 相位补偿参数 (上位机自动读取用)
+     * 输出格式 (一行一参数, key=value, 上位机正则匹配):
+     *   PARAMS_BEGIN
+     *   CurKp=45 CurKi=4 CurKd=0
+     *   SpdKp=1500 SpdKi=10 SpdKd=0
+     *   PosKp=3016 PosKi=9 PosKd=0
+     *   OffPos=0 OffNeg=0 CompPos=20 CompNeg=26
+     *   PARAMS_END
+     */
+    if (NULL != strstr((char *)dbgRecvBuf, "getparams")) {
+        printf("PARAMS_BEGIN\r\n");
+        printf("CurKp=%u CurKi=%u CurKd=%u\r\n",
+               (unsigned)controller_eyou.IncPID_QAxis.P,
+               (unsigned)controller_eyou.IncPID_QAxis.I,
+               (unsigned)controller_eyou.IncPID_QAxis.D);
+        printf("SpdKp=%u SpdKi=%u SpdKd=%u\r\n",
+               (unsigned)controller_eyou.IncPID_Speed.P,
+               (unsigned)controller_eyou.IncPID_Speed.I,
+               (unsigned)controller_eyou.IncPID_Speed.D);
+        printf("PosKp=%u PosKi=%u PosKd=%u\r\n",
+               (unsigned)controller_eyou.IncPID_Position.P,
+               (unsigned)controller_eyou.IncPID_Position.I,
+               (unsigned)controller_eyou.IncPID_Position.D);
+        printf("OffPos=%d OffNeg=%d CompPos=%d CompNeg=%d\r\n",
+               g_theta_offset_pos, g_theta_offset_neg,
+               g_theta_comp_pos, g_theta_comp_neg);
+        printf("PARAMS_END\r\n");
     }
 
     /* testfreq<N>: 设置单频注入频率 (Hz, 等效 CAN 0x2F06) */
@@ -1306,6 +1335,22 @@ void dbg_log_print(void) {
         printf("[Misc]\r\n");
         printf("  BrakeT          %-16u %u\r\n", ram->brake_time, fls->brake_time);
         printf("  Crc             0x%08lX       0x%08lX\r\n", (unsigned long)ram->Crc, (unsigned long)fls->Crc);
+        printf("[PhaseComp]\r\n");
+        printf("  PhCompFlag      0x%02X             0x%02X\r\n",
+               ram->PhaseCompFlag, fls->PhaseCompFlag);
+        /* RAM 列显示当前生效的全局变量, Flash 列从 temp5/temp6 解包 */
+        printf("  OffsetPos(0.1d) %-16d %d\r\n",
+               (int)g_theta_offset_pos,
+               (int)(int16_t)(fls->temp5 & 0xFFFF));
+        printf("  OffsetNeg(0.1d) %-16d %d\r\n",
+               (int)g_theta_offset_neg,
+               (int)(int16_t)((fls->temp5 >> 16) & 0xFFFF));
+        printf("  CompPos(0.1)    %-16d %d\r\n",
+               (int)g_theta_comp_pos,
+               (int)(int16_t)(fls->temp6 & 0xFFFF));
+        printf("  CompNeg(0.1)    %-16d %d\r\n",
+               (int)g_theta_comp_neg,
+               (int)(int16_t)((fls->temp6 >> 16) & 0xFFFF));
         printf("[Size] sizeof(FlashSavedData)=%u\r\n", (unsigned)sizeof(FlashSavedData));
         printf("===== End =====\r\n");
         dbgLogFlag = 0;

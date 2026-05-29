@@ -102,10 +102,24 @@ uint8_t InitFlashData(ControllerStruct* controller) {
     /* 1. 先从Flash读 */
     ReadDataFromAddress(controller, MOTORID0_RUN_DATA_ADDRESS);
 
-    /* 2. 版本检查：不匹配则强制重新初始化所有段 */
-    if (controller->FlashData.StructVersion != FLASH_STRUCT_VERSION) {
-        printf("Flash struct version mismatch (got %u, expect %u), force reinit\r\n",
-               (unsigned)controller->FlashData.StructVersion, FLASH_STRUCT_VERSION);
+    /* 2a. CRC 校验：失败则强制重新初始化所有段（与版本不匹配同样处理）
+       老固件没启用 CRC 时 Flash 中存的是 0xFFFFFFFF (擦除值) 或老的内存垃圾值,
+       一定算不对, 也会触发这里 → 自动迁移到带 CRC 的新格式 */
+    uint32_t crc_calc = Flash_Crc32(
+        &controller->FlashData,
+        sizeof(FlashSavedData) - sizeof(controller->FlashData.Crc));
+    uint8_t crc_bad = (crc_calc != controller->FlashData.Crc);
+    if (crc_bad) {
+        printf("Flash CRC mismatch (got 0x%08lX, calc 0x%08lX), force reinit\r\n",
+               (unsigned long)controller->FlashData.Crc, (unsigned long)crc_calc);
+    }
+
+    /* 2b. 版本检查：不匹配则强制重新初始化所有段 */
+    if (controller->FlashData.StructVersion != FLASH_STRUCT_VERSION || crc_bad) {
+        if (!crc_bad) {
+            printf("Flash struct version mismatch (got %u, expect %u), force reinit\r\n",
+                   (unsigned)controller->FlashData.StructVersion, FLASH_STRUCT_VERSION);
+        }
         controller->FlashData.StructVersion   = FLASH_STRUCT_VERSION;
         controller->FlashData.CurrentFlag     = 0xFFFF;
         controller->FlashData.AngleOffsetFlag = 0xFFFF;
@@ -116,6 +130,7 @@ uint8_t InitFlashData(ControllerStruct* controller) {
         controller->FlashData.MotorParamFlag  = 0xFFFF;
         controller->FlashData.FluxIdentFlag   = 0xFFFF;
         controller->FlashData.InertiaIdentFlag = 0xFFFF;
+        controller->FlashData.PhaseCompFlag   = 0xFFFF;
         InitReservedFields(&controller->FlashData);
         Temp = 0xFF;
     }
@@ -203,7 +218,25 @@ uint8_t InitFlashData(ControllerStruct* controller) {
         Temp++;
     }
 
-    /* 11. 如有改动则写回 Flash */
+    /* 11. 相位补偿参数：从 Flash 加载（如果有效） */
+    extern int16_t g_theta_offset_pos;
+    extern int16_t g_theta_offset_neg;
+    extern int16_t g_theta_comp_pos;
+    extern int16_t g_theta_comp_neg;
+    if (controller->FlashData.PhaseCompFlag == OFFEST_IS_CORRECTED_FLAG) {
+        /* 从 temp5/temp6 解包 */
+        g_theta_offset_pos = (int16_t)(controller->FlashData.temp5 & 0xFFFF);
+        g_theta_offset_neg = (int16_t)((controller->FlashData.temp5 >> 16) & 0xFFFF);
+        g_theta_comp_pos   = (int16_t)(controller->FlashData.temp6 & 0xFFFF);
+        g_theta_comp_neg   = (int16_t)((controller->FlashData.temp6 >> 16) & 0xFFFF);
+        printf("Flash: PhaseComp loaded: offset_pos=%d offset_neg=%d comp_pos=%d comp_neg=%d\r\n",
+               g_theta_offset_pos, g_theta_offset_neg, g_theta_comp_pos, g_theta_comp_neg);
+    } else {
+        /* 使用固件默认值（foc_bsp.c 中的初始化值） */
+        printf("Flash: PhaseComp not set, using firmware defaults\r\n");
+    }
+
+    /* 12. 如有改动则写回 Flash */
     if (Temp) {
         WriteRunDataToFlash(controller, MOTORID0_RUN_DATA_ADDRESS);
     }
@@ -271,6 +304,22 @@ uint8_t ReadDataFromAddress(ControllerStruct* controller, unsigned int Address) 
 }
 
 uint8_t WriteRunDataToFlash(ControllerStruct* controller, unsigned int Address) {
+    /* 写入前自动打包相位补偿全局变量到 FlashData (任何路径写 Flash 都不会丢相位补偿) */
+    extern int16_t g_theta_offset_pos;
+    extern int16_t g_theta_offset_neg;
+    extern int16_t g_theta_comp_pos;
+    extern int16_t g_theta_comp_neg;
+    controller->FlashData.temp5 = ((uint32_t)(uint16_t)g_theta_offset_neg << 16) |
+                                   (uint16_t)g_theta_offset_pos;
+    controller->FlashData.temp6 = ((uint32_t)(uint16_t)g_theta_comp_neg << 16) |
+                                   (uint16_t)g_theta_comp_pos;
+    controller->FlashData.PhaseCompFlag = OFFEST_IS_CORRECTED_FLAG;
+
+    /* CRC32 校验：算除 Crc 字段本身外的所有数据 (Crc 是结构体最后一个字段) */
+    controller->FlashData.Crc = Flash_Crc32(
+        &controller->FlashData,
+        sizeof(FlashSavedData) - sizeof(controller->FlashData.Crc));
+
     /* H743整扇区擦除，所以本扇区内其他数据会一起丢 —— 参数写回时要保证此扇区只存FlashData */
     if (Flash_EraseSector() != HAL_OK) {
         printf("Flash erase failed\r\n");
@@ -461,6 +510,21 @@ void InitReservedFields(FlashSavedData* FlashData) {
     FlashData->temp6 = 0;
     FlashData->temp7 = 0;
     FlashData->temp8 = 0;
+}
+
+void SavePhaseCompToFlash(void) {
+    extern ControllerStruct controller_eyou;
+    extern int16_t g_theta_offset_pos;
+    extern int16_t g_theta_offset_neg;
+    extern int16_t g_theta_comp_pos;
+    extern int16_t g_theta_comp_neg;
+
+    /* WriteRunDataToFlash 内部会自动打包 g_theta_* 到 temp5/temp6 + 置 PhaseCompFlag,
+       这里只是包一层友好日志 */
+    printf("Saving PhaseComp to Flash: offset_pos=%d offset_neg=%d comp_pos=%d comp_neg=%d\r\n",
+           g_theta_offset_pos, g_theta_offset_neg, g_theta_comp_pos, g_theta_comp_neg);
+
+    WriteRunDataToFlash(&controller_eyou, MOTORID0_RUN_DATA_ADDRESS);
 }
 
 uint16_t User_Data_Save(uint16_t control) {

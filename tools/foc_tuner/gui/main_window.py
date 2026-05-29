@@ -19,6 +19,7 @@ from gui.pid_panel import PIDPanel
 from gui.bandwidth_test_panel import BandwidthTestPanel
 from gui.flash_panel import FlashPanel
 from gui.fault_panel import FaultPanel
+from gui.maintenance_panel import MaintenancePanel
 
 
 class MainWindow(QMainWindow):
@@ -65,6 +66,9 @@ class MainWindow(QMainWindow):
         self._fault_panel = FaultPanel()
         left_tabs.addTab(self._fault_panel, "Faults")
 
+        self._maint_panel = MaintenancePanel()
+        left_tabs.addTab(self._maint_panel, "Maintenance")
+
         left_split.addWidget(left_tabs)
 
         # Bottom: Waveform display
@@ -110,6 +114,7 @@ class MainWindow(QMainWindow):
         self._bw_panel.sig_command.connect(self._serial.send)
         self._flash_panel.sig_command.connect(self._serial.send)
         self._fault_panel.sig_command.connect(self._serial.send)
+        self._maint_panel.sig_command.connect(self._serial.send)
 
         # Disabled until serial connects
         self._control_panel.setEnabled(False)
@@ -117,6 +122,7 @@ class MainWindow(QMainWindow):
         self._bw_panel.setEnabled(False)
         self._flash_panel.setEnabled(False)
         self._fault_panel.setEnabled(False)
+        self._maint_panel.setEnabled(False)
 
         # Initialize waveform channels for default logid (50 - speed)
         self._update_waveform_channels(50)
@@ -155,6 +161,7 @@ class MainWindow(QMainWindow):
         self._bw_panel.setEnabled(connected)
         self._flash_panel.setEnabled(connected)
         self._fault_panel.setEnabled(connected)
+        self._maint_panel.setEnabled(connected)
 
         if connected:
             self._console.append_line("=== Connected ===")
@@ -162,6 +169,9 @@ class MainWindow(QMainWindow):
             from core.protocol import build_logfreq, build_logid
             self._serial.send(build_logid(0))
             self._serial.send(build_logfreq(10))
+            # If user is already on the PID tab, auto-query params now
+            if self._left_tabs.currentIndex() == 1:
+                self._pid_panel.query_params()
         else:
             self._console.append_line("=== Disconnected ===")
 
@@ -179,6 +189,12 @@ class MainWindow(QMainWindow):
 
         # Pass to fault panel for fault detection
         self._fault_panel.process_line(line)
+
+        # Pass to maintenance panel for Cali / version output
+        self._maint_panel.process_line(line)
+
+        # Pass to PID panel for getparams response
+        self._pid_panel.process_line(line)
 
         # Try to parse
         frame = parse_line(line)
@@ -220,12 +236,17 @@ class MainWindow(QMainWindow):
         """Resize the tab area based on which tab is active.
 
         - Motor Control (0): compact 180px, waveform takes the rest.
-        - PID Tuning (1): natural ~400px, waveform takes the rest.
-        - BW Test / Flash / Faults (2/3/4): hide waveform — these pages have
-          their own result views and don't need live plots.
+        - PID Tuning (1): natural ~400px, waveform takes the rest. Auto-query
+          current PID + phase comp values from MCU.
+        - BW Test / Flash / Faults / Maintenance (2/3/4/5): hide waveform — these
+          pages have their own result views and don't need live plots.
         """
         # Tabs that don't need the waveform pane visible
-        WAVEFORM_HIDDEN_TABS = (2, 3, 4)
+        WAVEFORM_HIDDEN_TABS = (2, 3, 4, 5)
+
+        # Auto-query on PID tab activation (only if connected)
+        if index == 1 and self._serial_panel._connected:
+            self._pid_panel.query_params()
 
         if index in WAVEFORM_HIDDEN_TABS:
             self._waveform.hide()
