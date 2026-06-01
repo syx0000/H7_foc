@@ -32,6 +32,8 @@ class MainWindow(QMainWindow):
 
         # Core components
         self._serial = SerialWorker()
+        self._can = None  # 懒加载, 避免无创芯 DLL 时启动报错
+        self._active_worker = self._serial  # 默认串口
         self._data_model = DataModel(buffer_size=10000)
 
         # Build UI
@@ -108,14 +110,14 @@ class MainWindow(QMainWindow):
         self._serial.sig_line_received.connect(self._on_line_received)
         self._serial.sig_error.connect(self._on_error)
         self._serial.sig_connected.connect(self._on_connected)
-        self._control_panel.sig_command.connect(self._serial.send)
+        self._control_panel.sig_command.connect(self._send)
         self._control_panel._logid_combo.currentIndexChanged.connect(self._on_logid_changed)
-        self._pid_panel.sig_command.connect(self._serial.send)
-        self._bw_panel.sig_command.connect(self._serial.send)
-        self._flash_panel.sig_command.connect(self._serial.send)
-        self._fault_panel.sig_command.connect(self._serial.send)
-        self._maint_panel.sig_command.connect(self._serial.send)
-        self._console.sig_send_command.connect(self._serial.send)
+        self._pid_panel.sig_command.connect(self._send)
+        self._bw_panel.sig_command.connect(self._send)
+        self._flash_panel.sig_command.connect(self._send)
+        self._fault_panel.sig_command.connect(self._send)
+        self._maint_panel.sig_command.connect(self._send)
+        self._console.sig_send_command.connect(self._send)
 
         # Disabled until serial connects
         self._control_panel.setEnabled(False)
@@ -128,21 +130,46 @@ class MainWindow(QMainWindow):
         # Initialize waveform channels for default logid (50 - speed)
         self._update_waveform_channels(50)
 
-    @Slot(str, int)
-    def _on_connect_request(self, port: str, baud: int):
-        """Handle connection request from serial panel."""
-        self._serial.connect_port(port, baud)
+    @Slot(str, dict)
+    def _on_connect_request(self, backend: str, params: dict):
+        """Handle connection request from serial panel.
+
+        backend == 'serial': params = {port, baud}
+        backend == 'can':    params = {channel, abit, dbit}
+        """
+        if backend == "serial":
+            self._active_worker = self._serial
+            self._serial.connect_port(params["port"], params["baud"])
+        else:
+            # 懒加载 CanWorker (避免无 DLL 时启动报错)
+            if not hasattr(self, '_can') or self._can is None:
+                from core.can_worker import CanWorker
+                self._can = CanWorker()
+                self._can.sig_line_received.connect(self._on_line_received)
+                self._can.sig_error.connect(self._on_error)
+                self._can.sig_connected.connect(self._on_connected)
+            self._active_worker = self._can
+            self._can.connect_port(
+                channel=params["channel"], abit=params["abit"], dbit=params["dbit"]
+            )
 
     @Slot()
     def _on_disconnect_request(self):
         """Handle disconnection request."""
-        self._serial.disconnect_port()
+        if self._active_worker:
+            self._active_worker.disconnect_port()
+
+    @Slot(str)
+    def _send(self, cmd: str):
+        """Forward command to active worker (Serial or CAN)."""
+        if self._active_worker:
+            self._active_worker.send(cmd)
 
     @Slot()
     def _on_reset_request(self):
         """Send MCU reset command and sync UI state."""
         from core.protocol import build_reset
-        self._serial.send(build_reset())
+        self._send(build_reset())
         # MCU will reboot, PWM state goes away — uncheck the Enable button
         # silently (no further command needed; MCU is mid-reset).
         if self._control_panel._enable_btn.isChecked():
@@ -169,8 +196,8 @@ class MainWindow(QMainWindow):
             self._console.append_line("=== Connected ===")
             # Send logfreq only; logid stays 0 until user enables logging
             from core.protocol import build_logfreq, build_logid
-            self._serial.send(build_logid(0))
-            self._serial.send(build_logfreq(10))
+            self._send(build_logid(0))
+            self._send(build_logfreq(10))
             # If user is already on the PID tab, auto-query params now
             if self._left_tabs.currentIndex() == 1:
                 self._pid_panel.query_params()
@@ -272,4 +299,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Clean up on window close."""
         self._serial.disconnect_port()
+        if self._can:
+            self._can.disconnect_port()
         event.accept()

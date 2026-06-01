@@ -1,19 +1,26 @@
-"""Serial port connection panel.
+"""Serial / CAN-FD connection panel.
 
-Provides COM port selection, baud rate, connect/disconnect button,
-and a separated Reset MCU button.
+Provides backend selection (Serial / CAN), connection params,
+connect/disconnect button, and a separated Reset MCU button.
 """
 
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox
+    QWidget, QHBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox, QStackedWidget
 )
 from PySide6.QtCore import Signal
 
 
 class SerialPanel(QWidget):
-    """Serial port connection controls."""
+    """Connection controls (Serial or CAN-FD).
 
-    sig_connect_request = Signal(str, int)    # port_name, baud
+    sig_connect_request 第一个参数为 backend 字符串 ("serial" / "can"),
+    后续参数视 backend 而定:
+      - serial: (port_name:str, baud:int)
+      - can:    (channel:int, abit:int, dbit:int)
+    main_window 收到信号后用 backend 字段决定使用哪个 worker.
+    """
+
+    sig_connect_request = Signal(str, dict)   # backend, params
     sig_disconnect_request = Signal()
     sig_reset_request = Signal()              # Reset MCU button
 
@@ -23,23 +30,52 @@ class SerialPanel(QWidget):
 
         layout = QHBoxLayout(self)
 
-        # Port selection
-        layout.addWidget(QLabel("Port:"))
+        # ---- Backend selection ----
+        layout.addWidget(QLabel("Backend:"))
+        self._backend_combo = QComboBox()
+        self._backend_combo.addItems(["Serial", "CAN-FD"])
+        self._backend_combo.currentIndexChanged.connect(self._on_backend_changed)
+        layout.addWidget(self._backend_combo)
+
+        # ---- StackedWidget: serial 参数 vs CAN 参数 ----
+        self._stack = QStackedWidget()
+        layout.addWidget(self._stack)
+
+        # 串口参数页
+        ser_w = QWidget()
+        ser_l = QHBoxLayout(ser_w)
+        ser_l.setContentsMargins(0, 0, 0, 0)
+        ser_l.addWidget(QLabel("Port:"))
         self._port_combo = QComboBox()
         self._port_combo.setMinimumWidth(100)
-        layout.addWidget(self._port_combo)
-
-        # Refresh button
+        ser_l.addWidget(self._port_combo)
         self._refresh_btn = QPushButton("Refresh")
         self._refresh_btn.clicked.connect(self._refresh_ports)
-        layout.addWidget(self._refresh_btn)
-
-        # Baud rate
-        layout.addWidget(QLabel("Baud:"))
+        ser_l.addWidget(self._refresh_btn)
+        ser_l.addWidget(QLabel("Baud:"))
         self._baud_combo = QComboBox()
         self._baud_combo.addItems(["921600", "115200", "57600", "9600"])
         self._baud_combo.setCurrentText("921600")
-        layout.addWidget(self._baud_combo)
+        ser_l.addWidget(self._baud_combo)
+        self._stack.addWidget(ser_w)
+
+        # CAN 参数页
+        can_w = QWidget()
+        can_l = QHBoxLayout(can_w)
+        can_l.setContentsMargins(0, 0, 0, 0)
+        can_l.addWidget(QLabel("CH:"))
+        self._can_ch_combo = QComboBox()
+        self._can_ch_combo.addItems(["0", "1"])
+        can_l.addWidget(self._can_ch_combo)
+        can_l.addWidget(QLabel("Arb:"))
+        self._can_abit_combo = QComboBox()
+        self._can_abit_combo.addItems(["1000000", "500000", "250000"])
+        can_l.addWidget(self._can_abit_combo)
+        can_l.addWidget(QLabel("Data:"))
+        self._can_dbit_combo = QComboBox()
+        self._can_dbit_combo.addItems(["5000000", "2000000", "1000000"])
+        can_l.addWidget(self._can_dbit_combo)
+        self._stack.addWidget(can_w)
 
         # Connect button
         self._connect_btn = QPushButton("Connect")
@@ -61,6 +97,9 @@ class SerialPanel(QWidget):
         # Initial port scan
         self._refresh_ports()
 
+    def _on_backend_changed(self, idx: int):
+        self._stack.setCurrentIndex(idx)
+
     def _refresh_ports(self):
         """Scan and populate available COM ports."""
         from core.serial_worker import SerialWorker
@@ -72,11 +111,19 @@ class SerialPanel(QWidget):
         """Handle connect/disconnect button click."""
         if self._connected:
             self.sig_disconnect_request.emit()
-        else:
+            return
+        backend = "serial" if self._backend_combo.currentIndex() == 0 else "can"
+        if backend == "serial":
             port = self._port_combo.currentText()
             baud = int(self._baud_combo.currentText())
             if port:
-                self.sig_connect_request.emit(port, baud)
+                self.sig_connect_request.emit("serial", {"port": port, "baud": baud})
+        else:
+            self.sig_connect_request.emit("can", {
+                "channel": int(self._can_ch_combo.currentText()),
+                "abit": int(self._can_abit_combo.currentText()),
+                "dbit": int(self._can_dbit_combo.currentText()),
+            })
 
     def _on_reset_clicked(self):
         """Confirm and emit reset request."""
@@ -91,14 +138,14 @@ class SerialPanel(QWidget):
             self.sig_reset_request.emit()
 
     def set_connected(self, connected: bool):
-        """Update UI state based on connection status.
-
-        Args:
-            connected: True if connected, False otherwise
-        """
+        """Update UI state based on connection status."""
         self._connected = connected
         self._connect_btn.setText("Disconnect" if connected else "Connect")
+        self._backend_combo.setEnabled(not connected)
         self._port_combo.setEnabled(not connected)
         self._baud_combo.setEnabled(not connected)
         self._refresh_btn.setEnabled(not connected)
+        self._can_ch_combo.setEnabled(not connected)
+        self._can_abit_combo.setEnabled(not connected)
+        self._can_dbit_combo.setEnabled(not connected)
         self._reset_btn.setEnabled(connected)
