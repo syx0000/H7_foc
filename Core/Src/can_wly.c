@@ -3,6 +3,7 @@
  * @brief   万里扬FDCAN通信协议V1.7 - 从站实现
  */
 #include "can_wly.h"
+#include "can_debug.h"
 #include "fdcan.h"
 #include "foc_api.h"
 #include "foc_controller.h"
@@ -666,6 +667,13 @@ void can_wly_dbg_poll(void) {
 void fdcan_rx_user(uint32_t id, const uint8_t *data, uint32_t len) {
     s_rx_frame_cnt++;
     can_dbg_push(id, data, len, 0);
+
+    /* CAN 调试通道旁路 (0x7E0~0x7EF): 不喂万里扬看门狗 */
+    if (id >= CAN_DBG_ID_CMD && id <= 0x7EF) {
+        can_debug_rx_isr(id, data, len);
+        return;
+    }
+
     s_can_timeout_cnt = CAN_TIMEOUT_MS;
     if (!s_can_timeout_enabled) s_can_timeout_enabled = 1;
     /* 广播查询: 所有从站回 0x100+ID */

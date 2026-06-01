@@ -37,6 +37,7 @@
 #include "ifly_test.h"
 #include "ifly_fault.h"
 #include "can_wly.h"
+#include "can_debug.h"
 #include "flash_port.h"
 #include "ota_app.h"
 /* USER CODE END Includes */
@@ -227,6 +228,7 @@ int main(void)
 
 	/* 万里扬FDCAN协议从站初始化 (fdcan_rx_user 已在 can_wly.c 中覆盖弱符号) */
 	can_wly_init();
+	can_debug_init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -275,6 +277,7 @@ int main(void)
 
 		/* CAN RX 调试帧异步打印 (canrxdbg 命令开启) */
 		can_wly_dbg_poll();
+		can_debug_poll();
 
 		/* 非阻塞周期调用日志打印 */
 		static uint32_t log_tick = 0;
