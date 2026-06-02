@@ -62,7 +62,7 @@ extern volatile uint8_t USART_CONTROL;
  * LEAK_OUT: 退出衰减步进 0.03A/100µs ≈ 300A/s, 速度回落时快速复位 Id
  * OMEGA_E_MIN: 启用阈值, 低速时 Vs 不可能撞顶, 直接禁用避免噪声触发 */
 #define WMAG_VS_TRIGGER_RATIO 90          // % of g_vs_limit (90%, 留 BEMF FF 先消化)
-#define WMAG_ID_MIN_Q10       (-6144)     // -6A Q10 (额定~15A 的 40%, 退磁安全线内)
+#define WMAG_ID_MIN_Q10       (-10240)     // -6A Q10 (额定~15A 的 40%, 退磁安全线内)
 #define WMAG_KP               4
 #define WMAG_KI               1
 #define WMAG_DIV              100
@@ -144,7 +144,7 @@ extern volatile uint8_t USART_CONTROL;
 #define DEFAULT_RUN_MODE NO_MODE
 
 extern uint32_t MAX_CURRENT_PRE;
-#define DEFAULT_MAX_CURRENT (90 * 1024)    // 80A Q10, 扭矩/MIT 模式电流上限
+#define DEFAULT_MAX_CURRENT (120 * 1024)    // 80A Q10, 扭矩/MIT 模式电流上限
 
 // #define DEFAULT_MAX_SPEED                       (30 * 25*1024)   //30rpm
 extern uint32_t DEFAULT_MAX_SPEED;
