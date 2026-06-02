@@ -301,10 +301,10 @@ int main(void)
 			dcVoltageProFunc();          // 母线过/欠压
 			boradTempProFunc();          // 板温过温
 			motorTempProFunc();          // 电机绕组过温
-			phaseLossProFunc();          // 缺相保护 (KCL + 单相低电流双判据)
+			//phaseLossProFunc();          // 缺相保护 (KCL + 单相低电流双判据)
 			// busOverCurrentCheck();       // 母线过流
 			// LockedRotorProFunc();        // 堵转检测
-			driverChipFaultCheck();      // DRV8353 nFAULT 引脚
+			//driverChipFaultCheck();      // DRV8353 nFAULT 引脚
 			//motorSpeedOverCheck();       // 过速检测
 //			motorSpeedOffsetCheck();     // 速度跟随偏差
 //			motorPosOffsetCheck();       // 位置跟随偏差
