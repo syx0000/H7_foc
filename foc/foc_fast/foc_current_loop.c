@@ -286,6 +286,8 @@ void foc_current_close_loop(ControllerStruct* controller) {
 
   /* CAN 0x2F05 cmd=1 触发的逐拍数据回传 (0x7FD), 上传 (Iq_ref_filterd, I_q) */
   can_wly_test_isr_post(controller->I_q_ref_filterd, controller->I_q);
+  /* 同步刷新 Iq 反馈 LPF, 供 CAN 状态帧上报使用 (控制环用原始 I_q) */
+  can_wly_iq_fb_filter_update(controller->I_q);
   /********************************************************************/
 }
 

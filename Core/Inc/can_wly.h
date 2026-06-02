@@ -123,6 +123,12 @@ float can_wly_Nm_to_iA(float t_Nm);
 int16_t can_wly_test_isr_pre(void);                                       /* 返回单频注入信号 (Q10 A), 未启动返回 0 */
 void    can_wly_test_isr_post(int32_t iq_ref_filterd, int32_t iq_fb);     /* 打包 8B 帧立即发 0x7FD */
 
+/* Iq 反馈一阶 LPF, 仅供 CAN 状态帧上报使用 (避免 1kHz 抽样混叠 PWM 纹波)
+ * α = 1/8, 10kHz 采样下截止 ~200Hz, 高于速度环带宽 46Hz, 不掩盖真实扭振
+ * 控制环 (PI 反馈 / BEMF 解耦 / 死区补偿 / 故障检测) 仍用原始 I_q, 勿替换 */
+void    can_wly_iq_fb_filter_update(int32_t iq_q10);                      /* FOC ISR 每拍调用 */
+int32_t can_wly_iq_fb_get(void);                                          /* CAN 上报路径取滤波值 (Q10) */
+
 /* 减速比 (用于 rpm/rad-s 换算. 对齐 motor_h7: GR=25 对应 CLAUDE.md) */
 #define CAN_WLY_GR          25.0f
 

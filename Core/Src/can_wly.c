@@ -43,6 +43,11 @@ static uint32_t          s_test_tx_ok_cnt   = 0;         /* 0x7FD 发送成功�
 /* 发送失败计数器 (调试用) */
 static uint32_t s_tx_fail_count = 0;
 
+/* Iq 反馈滤波 (Q10, 一阶 IIR α=1/8, 10kHz → fc≈200Hz)
+ * 仅用于对外上报 (CAN 0x100/0x7FE 状态帧). 控制环不能用,
+ * 否则等于在闭环里塞滞后, 影响电流环带宽和稳定裕度 */
+static volatile int32_t s_iq_fb_filt_q10 = 0;
+
 /* CAN 超时保护：收到有效帧时重置，1ms 递减，归零停机 */
 #define CAN_TIMEOUT_MS 200
 #define MIT_TIMEOUT_MS 20
@@ -200,7 +205,7 @@ static int32_t tq_nm_to_iq(float nm) {
 static void pack_status_frame(uint8_t *d) {
     float pos_rad = pos_int_to_rad(controller_eyou.real_position_out);
     float vel_rad_s = vel_motor_to_load_rad_s(controller_eyou.dtheta_mech);
-    float tq_nm = tq_iq_to_nm(controller_eyou.I_q);
+    float tq_nm = tq_iq_to_nm(s_iq_fb_filt_q10);
 
     uint32_t p_int = float_to_uint(pos_rad, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
     uint16_t v_int = (uint16_t)float_to_uint(vel_rad_s, g_can_wly_lim.spd_min, g_can_wly_lim.spd_max, 16);
@@ -257,8 +262,9 @@ static void send_status_frame(void) {
 static void send_ext_status_frame(void) {
     uint8_t d[16] = {0};
 
-    /* 电流 RMS: |I_q| / 1024 (A) × 100 → 0.01A */
-    int32_t iq_abs = controller_eyou.I_q;
+    /* 电流 RMS: |I_q_filt| / 1024 (A) × 100 → 0.01A
+     * 用滤波值避免 1kHz 抽样混叠 PWM 纹波 */
+    int32_t iq_abs = s_iq_fb_filt_q10;
     if (iq_abs < 0) iq_abs = -iq_abs;
     uint16_t i_rms_100 = (uint16_t)((iq_abs * 100) / 1024);
 
@@ -845,4 +851,17 @@ uint32_t can_wly_get_test_tx_ok(void) {
 
 uint32_t can_wly_get_test_tx_fail(void) {
     return s_test_tx_fail_cnt;
+}
+
+/* ========== Iq 反馈一阶 LPF (仅供对外上报) ==========
+ * y[n] = y[n-1] + (x[n] - y[n-1]) >> 3,  α = 1/8
+ * 10kHz 采样下 fc = fs * α / (2π) ≈ 199Hz, 远高于速度环带宽 (46Hz)
+ * 不会掩盖真实扭振; 同时压住 PWM 纹波 / ADC 量化, 让 1kHz CAN 抽样不再混叠.
+ * 仅给 0x100 / 0x7FE 状态帧使用; PI 反馈/BEMF 解耦/死区补偿/故障检测仍用原始 I_q. */
+void can_wly_iq_fb_filter_update(int32_t iq_q10) {
+    s_iq_fb_filt_q10 += (iq_q10 - s_iq_fb_filt_q10) >> 3;
+}
+
+int32_t can_wly_iq_fb_get(void) {
+    return s_iq_fb_filt_q10;
 }
