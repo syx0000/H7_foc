@@ -71,8 +71,8 @@
 #define DEFAULT_CURRENT_CHECKK_TIME 32
 
 typedef struct {
-  int8_t board_temp;             // 1C
-  int8_t motor_temp;             // 1C
+  int16_t board_temp;            // 1C, 支持 -20 ~ +200°C, 类型留余量
+  int16_t motor_temp;            // 1C, 支持 -20 ~ +200°C
   uint32_t UPhaseu;              // u0.1V
   uint32_t VPhaseu;              // v0.1V
   uint32_t WPhaseu;              // w0.1V
@@ -99,8 +99,8 @@ void motorCurrentOffsetCheck(void);
 void motorOverPosCheck(void);
 uint8_t phaseLossProFunc(void);    /* 缺相保护 (1ms 慢环, KCL + 单相低 RMS 双判据) */
 uint8_t driverChipFaultCheck(void);
-int8_t getBoardTemp(void);
-int8_t getMotorTemp(void);
+int16_t getBoardTemp(void);
+int16_t getMotorTemp(void);
 uint32_t getUPhaseu(void);
 uint32_t getVPhaseu(void);
 uint32_t getWPhaseu(void);
@@ -116,8 +116,8 @@ uint8_t fault_brake_is_active(void);  /* 1=刹车状态机进行中, 0=空闲 */
 void drv_reset_tick_1ms(void);
 uint8_t drv_reset_is_active(void);    /* 1=DRV 复位进行中, 0=空闲 */
 /* ADC */
-int8_t TemperatureInquiry(uint16_t adc_value);
-int8_t MotorTemperatureInquiry(uint16_t adc_value);
+int16_t TemperatureInquiry(uint16_t adc_value);
+int16_t MotorTemperatureInquiry(uint16_t adc_value);
 
 /* NTC */
 #define NTC_TABLE_SIZE 96

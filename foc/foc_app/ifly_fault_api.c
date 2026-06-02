@@ -55,15 +55,15 @@ uint8_t get_motor_brake_state() {
     return 0;
 }
 
-uint8_t set_motor_temp_limit(int8_t MTempLimit) {
+uint8_t set_motor_temp_limit(int16_t MTempLimit) {
     return 0;
 }
 
-uint8_t set_borad_temp_warn(int8_t BTempWarn) {
+uint8_t set_borad_temp_warn(int16_t BTempWarn) {
     return 0;
 }
 
-uint8_t set_borad_temp_limit(int8_t BTempLimit) {
+uint8_t set_borad_temp_limit(int16_t BTempLimit) {
     return 0;
 }
 

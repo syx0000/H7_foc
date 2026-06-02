@@ -211,8 +211,8 @@ static void pack_status_frame(uint8_t *d) {
 
     /* WARN: Bit0=MOS过温警告(90°C), Bit1=电机过温警告 */
     uint8_t  warn = 0;
-    if (motorProValue.board_temp >= (int8_t)Threshold.TemBoradWarn) warn |= 0x01;
-    if (motorProValue.motor_temp >= (int8_t)Threshold.TemMortorWarn) warn |= 0x02;
+    if (motorProValue.board_temp >= (int16_t)Threshold.TemBoradWarn) warn |= 0x01;
+    if (motorProValue.motor_temp >= (int16_t)Threshold.TemMortorWarn) warn |= 0x02;
 
     d[0] = p_int & 0xFF;
     d[1] = (p_int >> 8) & 0xFF;
@@ -269,9 +269,9 @@ static void send_ext_status_frame(void) {
     /* 位置: real_position_out (1°/1024) → 0.001° */
     int32_t p_int = (int32_t)(((int64_t)controller_eyou.real_position_out * 1000) / 1024);
 
-    /* 温度: int8 °C → int16 0.1°C (有符号, 负温度也正确) */
-    int16_t temp_motor = (int16_t)motorProValue.motor_temp * 10;
-    int16_t temp_mos   = (int16_t)motorProValue.board_temp * 10;
+    /* 温度: int16 °C → int16 0.1°C (有符号, 负温度也正确) */
+    int16_t temp_motor = motorProValue.motor_temp * 10;
+    int16_t temp_mos   = motorProValue.board_temp * 10;
 
     d[0] = i_rms_100 & 0xFF;
     d[1] = (i_rms_100 >> 8) & 0xFF;
@@ -289,7 +289,7 @@ static void send_ext_status_frame(void) {
     uint8_t sta = 0;
     if (controller_eyou.foc_run) sta |= 0x01;
     if (controller_eyou.ServoErrFlag.All_Flag) sta |= 0x02;
-    if (motorProValue.board_temp >= (int8_t)Threshold.TemBoradWarn) sta |= 0x04;
+    if (motorProValue.board_temp >= (int16_t)Threshold.TemBoradWarn) sta |= 0x04;
     if (controller_eyou.ServoState.Bit.PositionArrivedFlag) sta |= 0x08;
     d[12] = sta;
 

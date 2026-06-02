@@ -1137,8 +1137,10 @@ void dbg_log_print(void) {
         printf("current_get: %d,%d\r\n", controller_eyou.V_q, controller_eyou.V_d);
         break;
     case 40:
+        /* I_q 用对外上报的 LPF 值 (~200Hz fc), 避免 PWM 纹波抽样混叠;
+         * 控制环与诊断瞬时值仍走原始 controller_eyou.I_q */
         printf("current_pi: %d, %d, %d, %d, %d, %d, %d\r\n",
-               controller_eyou.I_q,
+               can_wly_iq_fb_get(),
                controller_eyou.I_d,
                controller_eyou.V_q,
                controller_eyou.V_d,
@@ -1298,8 +1300,8 @@ void dbg_log_print(void) {
 
         /* 获取转换后的值（已经是 0.1 单位）*/
         uint32_t udc_01v = motorProValue.Udc;           /* 0.1V */
-        int8_t t_board_c = motorProValue.board_temp;    /* °C */
-        int8_t t_motor_c = motorProValue.motor_temp;    /* °C */
+        int16_t t_board_c = motorProValue.board_temp;   /* °C */
+        int16_t t_motor_c = motorProValue.motor_temp;   /* °C */
 
         /* 转换为 0.1 单位 */
         int16_t t_board_01c = t_board_c * 10;          /* 0.1°C */

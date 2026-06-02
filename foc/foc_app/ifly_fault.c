@@ -88,14 +88,14 @@ void adc_convert(void) {
 #define NTC_T_REF        298.15f    /* 25°C in Kelvin */
 #define NTC_ABS_ZERO     273.15f
 
-int8_t TemperatureInquiry(uint16_t adc_value) {
+int16_t TemperatureInquiry(uint16_t adc_value) {
     if (adc_value == 0 || adc_value >= 65535) return 0;
 
     float ratio = (float)adc_value / 65535.0f;
     float r_ntc = NTC_R_DIVIDER * ratio / (1.0f - ratio);
 
     float temp_k = 1.0f / ((1.0f / NTC_T_REF) + logf(r_ntc / NTC_R_REF) / NTC_B_VALUE);
-    int8_t temp_c = (int8_t)(temp_k - NTC_ABS_ZERO);
+    int16_t temp_c = (int16_t)(temp_k - NTC_ABS_ZERO);
 
     return temp_c;
 }
@@ -134,7 +134,7 @@ static const uint16_t motor_ntc_r_nom[MOTOR_NTC_NPTS] = {
 };
 /* 注：-20°C 实际 Rnom=69195Ω 超出 uint16，clamp 到 65535（饱和判极冷） */
 
-int8_t MotorTemperatureInquiry(uint16_t adc_value) {
+int16_t MotorTemperatureInquiry(uint16_t adc_value) {
     /* raw 接近满量程 = NTC 开路 (未连接 / 接线断 / 引脚浮空被上拉)
      * 阈值 64000: 对应 R_ntc ≈ 416kΩ, 远超 -40°C 时的 ~330kΩ 上限
      * 返回 0 而非 MOTOR_NTC_TMIN, 避免下游误判极冷导致逻辑异常 */
@@ -148,7 +148,7 @@ int8_t MotorTemperatureInquiry(uint16_t adc_value) {
     /* 查表（电阻随温度递减）：找到 r_ntc 落入的区间 [r_hi, r_lo] */
     if (r_ntc >= motor_ntc_r_nom[0]) return MOTOR_NTC_TMIN;
     if (r_ntc <= motor_ntc_r_nom[MOTOR_NTC_NPTS - 1])
-        return (int8_t)(MOTOR_NTC_TMIN + MOTOR_NTC_TSTEP * (MOTOR_NTC_NPTS - 1));
+        return (int16_t)(MOTOR_NTC_TMIN + MOTOR_NTC_TSTEP * (MOTOR_NTC_NPTS - 1));
 
     int i = 0;
     for (i = 0; i < MOTOR_NTC_NPTS - 1; i++) {
@@ -159,7 +159,7 @@ int8_t MotorTemperatureInquiry(uint16_t adc_value) {
     int32_t r_lo = motor_ntc_r_nom[i];
     int32_t r_hi = motor_ntc_r_nom[i + 1];
     int32_t t = t_lo + (MOTOR_NTC_TSTEP * (r_lo - (int32_t)r_ntc)) / (r_lo - r_hi);
-    return (int8_t)t;
+    return (int16_t)t;
 }
 
 /*******************************************************************************
@@ -196,9 +196,9 @@ int8_t dcVoltageProFunc(void) {
  * boradTempProFunc - 板温过温保护（两级：警告 + 停机）
  ******************************************************************************/
 int8_t boradTempProFunc(void) {
-    int8_t temp = motorProValue.board_temp;
+    int16_t temp = motorProValue.board_temp;
 
-    if (temp >= (int8_t)Threshold.TemBorad) {
+    if (temp >= (int16_t)Threshold.TemBorad) {
         if (++ot_board_filter_cnt >= FILTER_TIME) {
             ot_board_filter_cnt = FILTER_TIME;
             controller_eyou.ServoErrFlag.Bit.HighBoardTempErr = 1;
@@ -219,15 +219,15 @@ int8_t boradTempProFunc(void) {
 static uint8_t motor_temp_warn_printed = 0;
 
 int8_t motorTempProFunc(void) {
-    int8_t temp = motorProValue.motor_temp;
+    int16_t temp = motorProValue.motor_temp;
 
-    if (temp >= (int8_t)Threshold.TemMortor) {
+    if (temp >= (int16_t)Threshold.TemMortor) {
         if (++ot_motor_filter_cnt >= FILTER_TIME) {
             ot_motor_filter_cnt = FILTER_TIME;
             controller_eyou.ServoErrFlag.Bit.HighMotorTempErr = 1;
             return 1;
         }
-    } else if (temp >= (int8_t)Threshold.TemMortorWarn) {
+    } else if (temp >= (int16_t)Threshold.TemMortorWarn) {
         ot_motor_filter_cnt = 0;
         if (!motor_temp_warn_printed) {
             printf("WARN: motor temp %dC >= %d\r\n", temp, Threshold.TemMortorWarn);
@@ -888,8 +888,8 @@ void motorSpeedOverCheck(void) {
 /*******************************************************************************
  * Getter 函数
  ******************************************************************************/
-int8_t getBoardTemp(void) { return motorProValue.board_temp; }
-int8_t getMotorTemp(void) { return motorProValue.motor_temp; }
+int16_t getBoardTemp(void) { return motorProValue.board_temp; }
+int16_t getMotorTemp(void) { return motorProValue.motor_temp; }
 uint32_t getUPhaseu(void) { return motorProValue.UPhaseu; }
 uint32_t getVPhaseu(void) { return motorProValue.VPhaseu; }
 uint32_t getWPhaseu(void) { return motorProValue.WPhaseu; }
