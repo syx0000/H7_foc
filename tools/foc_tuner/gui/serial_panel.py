@@ -4,10 +4,15 @@ Provides backend selection (Serial / CAN), connection params,
 connect/disconnect button, and a separated Reset MCU button.
 """
 
+import json
+import os
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QComboBox, QPushButton, QMessageBox, QStackedWidget
 )
 from PySide6.QtCore import Signal
+
+
+_CONNECTION_CONFIG_FILE = "foc_tuner_connection.json"
 
 
 class SerialPanel(QWidget):
@@ -97,6 +102,56 @@ class SerialPanel(QWidget):
         # Initial port scan
         self._refresh_ports()
 
+        # 加载上次连接配置
+        self._load_connection_config()
+
+    def _load_connection_config(self):
+        """加载上次的连接配置（backend / port / baud / can 参数）"""
+        try:
+            if not os.path.exists(_CONNECTION_CONFIG_FILE):
+                return
+            with open(_CONNECTION_CONFIG_FILE, 'r') as f:
+                cfg = json.load(f)
+            # Backend
+            backend = cfg.get('backend', 'Serial')
+            idx = 0 if backend == 'Serial' else 1
+            self._backend_combo.setCurrentIndex(idx)
+            # Serial 参数
+            port = cfg.get('port', '')
+            if port and self._port_combo.findText(port) >= 0:
+                self._port_combo.setCurrentText(port)
+            baud = cfg.get('baud', '921600')
+            if self._baud_combo.findText(str(baud)) >= 0:
+                self._baud_combo.setCurrentText(str(baud))
+            # CAN 参数
+            can_ch = cfg.get('can_channel', '0')
+            if self._can_ch_combo.findText(str(can_ch)) >= 0:
+                self._can_ch_combo.setCurrentText(str(can_ch))
+            can_abit = cfg.get('can_abit', '1000000')
+            if self._can_abit_combo.findText(str(can_abit)) >= 0:
+                self._can_abit_combo.setCurrentText(str(can_abit))
+            can_dbit = cfg.get('can_dbit', '5000000')
+            if self._can_dbit_combo.findText(str(can_dbit)) >= 0:
+                self._can_dbit_combo.setCurrentText(str(can_dbit))
+        except Exception as e:
+            print(f"[WARN] Failed to load connection config: {e}")
+
+    def _save_connection_config(self):
+        """保存当前连接配置"""
+        try:
+            cfg = {
+                'backend': self._backend_combo.currentText(),
+                'port': self._port_combo.currentText(),
+                'baud': self._baud_combo.currentText(),
+                'can_channel': self._can_ch_combo.currentText(),
+                'can_abit': self._can_abit_combo.currentText(),
+                'can_dbit': self._can_dbit_combo.currentText(),
+            }
+            with open(_CONNECTION_CONFIG_FILE, 'w') as f:
+                json.dump(cfg, f, indent=2)
+        except Exception as e:
+            print(f"[WARN] Failed to save connection config: {e}")
+
     def _on_backend_changed(self, idx: int):
         self._stack.setCurrentIndex(idx)
 
@@ -113,6 +168,8 @@ class SerialPanel(QWidget):
             self.sig_disconnect_request.emit()
             return
         backend = "serial" if self._backend_combo.currentIndex() == 0 else "can"
+        # 保存连接配置（连接前保存，无论是否成功）
+        self._save_connection_config()
         if backend == "serial":
             port = self._port_combo.currentText()
             baud = int(self._baud_combo.currentText())

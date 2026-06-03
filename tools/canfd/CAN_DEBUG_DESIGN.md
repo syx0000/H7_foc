@@ -860,7 +860,7 @@ CAN 后端只要确保**emit 的信号名和参数顺序与串口一致**，所�
 
 ### Phase 4（周期日志 + 异步事件 + GUI 集成）✅ 已完成
 
-- [x] **P4.1** `can_debug_send_log()` 实现 LOG_ID 10/40/50/70（全部 ≤ 32B）
+- [x] **P4.1** `can_debug_send_log()` 实现 LOG_ID 10/30/40/50/60/70/90/100（全部 ≤ 32B）
 - [x] **P4.2** TX FIFO 节流（< 4 槽时丢日志，保万里扬协议帧优先）
 - [x] **P4.3** `can_debug_send_event()` 异步事件 API
 - [x] **P4.4** Python `parse_log` / `parse_event` + LOG_ID schema
@@ -868,18 +868,25 @@ CAN 后端只要确保**emit 的信号名和参数顺序与串口一致**，所�
 - [x] **P4.6** **foc_tuner 加 CAN 后端**：`core/can_worker.py` (mimics SerialWorker)
 - [x] **P4.7** **foc_tuner GUI 改造**：`serial_panel.py` 加 Backend 下拉 + `main_window.py` active_worker 切换
 
-> ⚠️ 注意：`dbg_log_print()` 的 CAN 双路输出（调用 `can_debug_send_log()`）**尚未接入**，
-> 需要在 foc_bsp.c 入口加一行调用。由于上次加入后引发抖动问题（实际根因是 FIFO 64B），
-> 现在 FIFO 不动了，加入应该安全。待盒子验证后再接入。
+### Phase 4.5（MCU 补全）✅ 已完成（2026-06-03）
 
-### Phase 4.5（MCU 补全）⏸ 待盒子验证后实施
+- [x] `foc_bsp.c::dbg_log_print()` 入口加 `can_debug_send_log()` 调用（CAN 双路输出）
+  - 在 8 个常用 logid 的 printf 后面添加调用：10/30/40/50/60/70/90/100
+  - 添加 `#include "can_debug.h"`
+- [x] `can_debug.c` dispatch 加 PHASE_COMP_SET / PHASE_COMP_SAVE / CANRXDBG 命令处理
+  - `h_phase_comp_set()`: 操作 `g_theta_offset_pos/neg`, `g_theta_comp_pos/neg`
+  - `h_phase_comp_save()`: 调用 `SavePhaseCompToFlash()`
+  - `h_canrxdbg()`: 操作 `g_can_rx_debug`
+- [x] `can_debug_send_log()` 补全 logid 30/60/90/100
+  - 添加 `w_u32()` 辅助函数
+- [x] Python `can_debug_protocol.py` VERSION 响应解析适配 29B 格式（soft:10 + hw:8 + build:11）
+  - 修复 `parse_version_payload()` 和单元测试
 
-- [ ] `foc_bsp.c::dbg_log_print()` 入口加 `can_debug_send_log()` 调用（CAN 双路输出）
-- [ ] `foc_bsp.c` bwtest 分支末尾加 `can_debug_send_event(EVT_BWTEST_DONE, ...)`
-- [ ] `foc_bsp.c` Cali 分支末尾加 `can_debug_send_event(EVT_CALI_DONE, ...)`
-- [ ] `can_debug.c` dispatch 加 PHASE_COMP_SET / PHASE_COMP_SAVE / CANRXDBG 命令处理
-- [ ] `can_debug_send_log()` 补全 logid 30/60/90/100
-- [ ] Python `can_debug_protocol.py` VERSION 响应解析适配 31B 新格式（soft:10 + hw:8 + build:11）
+**验证结果**：
+- ✅ 编译：0 Error 0 Warning
+- ✅ 周期日志：logid=50, 100ms 周期，5秒 48 条无丢帧
+- ✅ 命令：14/14 实现完成（PING/VERSION/RESET/LOGID/LOGFREQ/3×PID/3×FLASH/ENABLE/2×PHASE_COMP/CANRXDBG）
+- ✅ 串口路径：零影响，所有 printf 保持不变
 
 ### Phase 5（OTA + 调试文本透传 + GUI 收尾）⏸ 待实施
 

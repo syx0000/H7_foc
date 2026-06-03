@@ -48,11 +48,14 @@ class CMD(IntEnum):
     # Flash 类
     FLASH_WRITE         = 0x40
     FLASH_ERASE         = 0x41
+    FLASH_COMPARE       = 0x42
     FAULT_CLR           = 0x43
     # 运动控制类
     ENABLE              = 0x50
     PHASE_COMP_SET      = 0x52
     PHASE_COMP_SAVE     = 0x53
+    CALI                = 0x5F
+    BWTEST              = 0x60
     # CAN 状态类
     CANRXDBG            = 0x61
 
@@ -110,6 +113,11 @@ def pack_reset() -> bytes:
     return bytes([CMD.RESET])
 
 
+def pack_get_params() -> bytes:
+    """查询所有 PID + 相位补偿参数"""
+    return bytes([CMD.GET_PARAMS])
+
+
 # ===== 日志类 =====
 def pack_logid_set(log_id: int) -> bytes:
     return struct.pack('<BH', CMD.LOGID_SET, log_id)
@@ -133,6 +141,10 @@ def pack_flash_erase() -> bytes:
     return bytes([CMD.FLASH_ERASE])
 
 
+def pack_flash_compare() -> bytes:
+    return bytes([CMD.FLASH_COMPARE])
+
+
 def pack_fault_clear() -> bytes:
     return bytes([CMD.FAULT_CLR])
 
@@ -154,6 +166,22 @@ def pack_phase_comp_save() -> bytes:
 # ===== CAN 状态类 =====
 def pack_canrxdbg(enable: bool) -> bytes:
     return bytes([CMD.CANRXDBG, 1 if enable else 0])
+
+
+def pack_bwtest(test_id: int) -> bytes:
+    """带宽测试/辨识/autoTune
+
+    Args:
+        test_id: 1=电流环BW, 2=速度环BW, 3=Rs/Ld/Lq, 4=磁链, 5=惯量,
+                 6=电流autoTune, 7=速度autoTune, 8=位置autoTune,
+                 9=位置环BW, 10=死区标定
+    """
+    return bytes([CMD.BWTEST, test_id])
+
+
+def pack_cali() -> bytes:
+    """电角度偏置辨识 + Flash 保存"""
+    return bytes([CMD.CALI])
 
 
 # ===== 0x7E2 周期日志解析 =====
@@ -231,8 +259,8 @@ class VersionInfo:
 
 
 def parse_version_payload(payload: bytes) -> VersionInfo:
-    """VERSION 响应 payload: [soft:12][hw:12][build:12] (固定长度, 0 padded)"""
-    if len(payload) < 36:
+    """VERSION 响应 payload: [soft:10][hw:8][build:11] = 29B (32B FIFO 约束, 见 CAN_DEBUG_DESIGN.md §3.2)"""
+    if len(payload) < 29:
         raise ValueError(f"version payload too short: {len(payload)}")
 
     def _take(buf: bytes) -> str:
@@ -243,9 +271,9 @@ def parse_version_payload(payload: bytes) -> VersionInfo:
         return buf[:end].decode('ascii', errors='replace').strip()
 
     return VersionInfo(
-        soft=_take(payload[0:12]),
-        hard=_take(payload[12:24]),
-        build=_take(payload[24:36]),
+        soft=_take(payload[0:10]),
+        hard=_take(payload[10:18]),
+        build=_take(payload[18:29]),
     )
 
 
@@ -259,3 +287,35 @@ def parse_ping_payload(payload: bytes) -> PingInfo:
     if len(payload) < 2:
         raise ValueError(f"ping payload too short: {len(payload)}")
     return PingInfo(proto_ver=payload[0])
+
+
+@dataclass
+class ParamsInfo:
+    """所有 PID + 相位补偿参数"""
+    cur_kp: int
+    cur_ki: int
+    cur_kd: int
+    spd_kp: int
+    spd_ki: int
+    spd_kd: int
+    pos_kp: int
+    pos_ki: int
+    pos_kd: int
+    off_pos: int
+    off_neg: int
+    comp_pos: int
+    comp_neg: int
+
+
+def parse_params_payload(payload: bytes) -> ParamsInfo:
+    """GET_PARAMS 响应 payload: 9×u16 + 4×i16 = 26B"""
+    if len(payload) < 26:
+        raise ValueError(f"params payload too short: {len(payload)}")
+    # 小端序解包
+    vals = struct.unpack('<9H4h', payload[:26])
+    return ParamsInfo(
+        cur_kp=vals[0], cur_ki=vals[1], cur_kd=vals[2],
+        spd_kp=vals[3], spd_ki=vals[4], spd_kd=vals[5],
+        pos_kp=vals[6], pos_ki=vals[7], pos_kd=vals[8],
+        off_pos=vals[9], off_neg=vals[10], comp_pos=vals[11], comp_neg=vals[12]
+    )

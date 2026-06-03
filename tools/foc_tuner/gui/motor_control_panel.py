@@ -14,10 +14,15 @@ from core.protocol import build_runcmd, build_enable
 class MotorControlPanel(QWidget):
     """Motor control interface with mode selection and target input."""
 
-    sig_command = Signal(str)  # Command string to send
+    sig_command = Signal(str)  # Command string to send (串口模式)
+    sig_wly_speed = Signal(float)  # 万里扬速度指令 (CAN 模式)
+    sig_wly_position = Signal(float, float)  # 万里扬位置指令 (pos, speed)
+    sig_wly_torque = Signal(float)  # 万里扬转矩指令
+    sig_wly_enable = Signal(bool)  # 万里扬使能控制
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._backend = "serial"  # 默认串口模式
 
         # Two groups laid horizontally (Motor Control | Data Logging)
         # so the left tab page stays compact and the rest goes to waveform
@@ -120,8 +125,25 @@ class MotorControlPanel(QWidget):
         target = self._target_spin.value()
         if self._reverse_cb.isChecked():
             target = -target
-        cmd = build_runcmd(cmd=2, mode=mode, target=target)
-        self.sig_command.emit(cmd)
+
+        if self._backend == "serial":
+            # 串口模式: 发送 Runcmd 文本命令
+            cmd = build_runcmd(cmd=2, mode=mode, target=target)
+            self.sig_command.emit(cmd)
+        else:
+            # CAN 模式: 根据模式发送万里扬协议帧
+            if mode == 1:  # Position
+                # 位置模式, 默认速度 100 rpm
+                self.sig_wly_position.emit(target, 100.0)
+            elif mode == 3:  # Velocity
+                self.sig_wly_speed.emit(target)
+            elif mode == 4:  # Torque
+                self.sig_wly_torque.emit(target)
+            else:
+                # 其他模式暂不支持, 回退到文本命令
+                cmd = build_runcmd(cmd=2, mode=mode, target=target)
+                self.sig_command.emit(cmd)
+
         # Sync UI: Run auto-enables PWM (TIM1->BDTR MOE + CCER), reflect without re-sending
         if not self._enable_btn.isChecked():
             self._enable_btn.blockSignals(True)
@@ -130,8 +152,12 @@ class MotorControlPanel(QWidget):
 
     def _on_enable_toggled(self, checked: bool):
         """Send enable/disable command."""
-        cmd = build_enable(checked)
-        self.sig_command.emit(cmd)
+        if self._backend == "serial":
+            cmd = build_enable(checked)
+            self.sig_command.emit(cmd)
+        else:
+            # CAN 模式: 发送万里扬使能控制帧
+            self.sig_wly_enable.emit(checked)
 
     def _on_logid_changed(self):
         """Send logid command when selection changes (only if enabled)."""
@@ -167,3 +193,7 @@ class MotorControlPanel(QWidget):
             Current logid value
         """
         return self._logid_combo.currentData()
+
+    def set_backend(self, backend: str):
+        """设置后端类型 ('serial' 或 'can')."""
+        self._backend = backend

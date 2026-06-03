@@ -49,10 +49,10 @@ class TestParseResp(unittest.TestCase):
 
 class TestVersionPayload(unittest.TestCase):
     def test_normal(self):
-        # 36B: soft=12 + hw=12 + build=12, 0 padded
-        soft  = b"20260528.1\x00\x00"
-        hard  = b"20260528\x00\x00\x00\x00"
-        build = b"Jun  1 2026\x00"
+        # 29B: soft=10 + hw=8 + build=11 (32B FIFO 约束, 见 CAN_DEBUG_DESIGN.md §3.2)
+        soft  = b"20260528.1"
+        hard  = b"20260528"
+        build = b"Jun  1 2026"
         v = proto.parse_version_payload(soft + hard + build)
         self.assertEqual(v.soft, "20260528.1")
         self.assertEqual(v.hard, "20260528")

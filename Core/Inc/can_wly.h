@@ -6,8 +6,11 @@
  *   - motor_h7_0426/UserSrc/Src/can_rv.c (H7参考实现)
  *
  * 帧ID布局: [10:7]=category | [6:0]=CANID (节点地址, 默认 1, 范围 1..127)
- *   0x080        : 广播状态查询 -> 从站回 0x100+ID (12 字节状态帧)
- *   0x100+ID     : 从站主动/回复状态帧 (POS[24] VEL[16] T[16] ERR1[16] ERR2[8] WARN[8] STA[8])
+ *   0x080        : 广播状态查询 -> 从站回 0x100+ID (33 字节状态帧)
+ *   0x100+ID     : 从站主动/回复状态帧 (33B, 见下方字段映射)
+ *                  Pact[24] Vact[16] Tact[16] Err1[16] Err2[16] warn[8] STA[8]
+ *                  Pcmd[24] Vcmd[16] Tcmd[16] iqref[16] iqfdb[16] Irms[16] MIT_T[16]
+ *                  Vdc[8] Temp_D[16] Temp_M[16]
  *   0x200        : 速度指令 (每从站 3 字节: V_des[16] + CANID[8])
  *   0x300        : 转矩指令 (每从站 3 字节: T_des[16] + CANID[8])
  *   0x400        : 位置指令 (每从站 6 字节: POS[24] + V_des[16] + CANID[8])

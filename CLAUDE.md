@@ -310,6 +310,108 @@ FOC initialization done, NPP=8, foc_run=2         ← 闭环使能成功
 - `0x02` = LowBusVolErr（母线欠压，通常电源没接或 VDC 通路异常）
 - `0x01` = OverBusVolErr, `0x04` = HighBoardTempErr, `0x08` = OverBusCurrentErr, 等。
 
+## CAN-FD 调试协议（镜像串口调试通道）
+
+**协议版本**: V1.0  
+**设计文档**: `tools/canfd/CAN_DEBUG_DESIGN.md`  
+**验证报告**: `CAN_DEBUG_VERIFICATION.md`  
+**上位机**: `tools/canfd_console/` (Python CLI) + `tools/foc_tuner/` (PyQt GUI, 支持 Serial/CAN 后端切换)
+
+**0x100 状态帧规格**: `CAN_0x100_FRAME_SPEC.md` (完整 33 字节字段映射 + 标幺化公式)
+
+### CAN ID 分配（0x7E0~0x7EF 调试专用段）
+| ID | 方向 | 用途 | 频率 |
+|----|------|------|------|
+| 0x7E0 | PC→MCU | 调试命令请求 | 偶发 |
+| 0x7E1 | MCU→PC | 调试命令响应 | 偶发 |
+| 0x7E2 | MCU→PC | 周期日志流 | 高速（最高 10kHz） |
+| 0x7E3 | MCU→PC | 异步事件（bwtest/Cali 完成） | 偶发 |
+| 0x7E4 | PC→MCU | OTA 数据分片 | 串行 |
+| 0x7E5 | MCU→PC | OTA 进度/ACK | 串行 |
+
+**与万里扬协议关系**: 完全独立，零冲突。万里扬使用 `0x080~0x77F` + `0x7FD/0x7FE`。
+
+### CAN 调试命令（14 个，全部实现）
+| CMD_ID | 命令 | 功能 | 状态 |
+|--------|------|------|------|
+| 0x00 | PING | 连接确认 + 协议版本 | ✅ |
+| 0x01 | VERSION | 固件版本查询 | ✅ |
+| 0x02 | RESET | 系统复位 | ✅ |
+| 0x10 | LOGID_SET | 切换周期日志 | ✅ |
+| 0x11 | LOGFREQ_SET | 设置日志周期 | ✅ |
+| 0x20 | CUR_PID_SET | 电流环 PID 调参 | ✅ |
+| 0x21 | SPD_PID_SET | 速度环 PID 调参 | ✅ |
+| 0x22 | POS_PID_SET | 位置环 PID 调参 | ✅ |
+| 0x40 | FLASH_WRITE | 写 Flash | ✅ |
+| 0x41 | FLASH_ERASE | 擦除 Flash | ✅ |
+| 0x43 | FAULT_CLR | 清除故障 | ✅ |
+| 0x50 | ENABLE | PWM 使能控制 | ✅ |
+| 0x52 | PHASE_COMP_SET | 相位补偿设置 | ✅ |
+| 0x53 | PHASE_COMP_SAVE | 相位补偿保存 | ✅ |
+| 0x61 | CANRXDBG | CAN RX 调试打印开关 | ✅ |
+
+### 周期日志 schema（0x7E2，8 种）
+所有日志帧头 4B: `[LOG_ID:u8][SEQ:u8][TS_MS:u16_le]`
+
+| logid | 字段 | 帧大小 | 说明 |
+|-------|------|--------|------|
+| 10 | now_mech, theta_elec, pos_out, pos, dtheta | 22B | 电角度 |
+| 30 | V_q, V_d | 12B | 电压 |
+| 40 | I_q, I_d, V_q, V_d, I_q_ref, I_d_ref, I_q_ref_filt | 32B | 电流 PI |
+| 50 | v_ref, v_ref_filt, v_fb_motor, v_fb_load, v_err | 24B | 速度 |
+| 60 | CCR2, CCR3, CCR4 | 16B | PWM 占空比 |
+| 70 | CCR2/3/4, I_a/b/c | 22B | CCR + 相电流 |
+| 90 | Ia_raw, Ib_raw, Ic_raw | 16B | 原始 ADC |
+| 100 | pos_ref, pos_fb, pos_err, mech_offset | 20B | 位置 |
+
+### CAN 调试 CLI 使用
+```bash
+cd tools/canfd_console
+
+# 连接测试
+python can_console.py ping
+python can_console.py version
+
+# 配置日志
+python can_console.py logid 50              # 切换到速度日志
+python can_console.py logfreq 100           # 设置 100ms 周期
+
+# 实时监听
+python can_console.py listen --duration 10  # 监听 10 秒
+
+# 导出 CSV
+python can_console.py log-to-csv --logid 50 --logfreq 50 --duration 60 --out speed.csv
+
+# PID 调参
+python can_console.py pid-current 45 4 0
+python can_console.py pid-speed 1500 10 0
+
+# Flash 操作
+python can_console.py flash-write
+python can_console.py flash-erase
+python can_console.py fault-clear
+```
+
+### CAN 双路输出架构
+```
+dbg_log_print() (main loop, 节流 logPriodMs)
+  ├─ printf("...") → USART1 (文本，保持不变)
+  └─ can_debug_send_log() → 0x7E2 (二进制，新增)
+      ├─ TX FIFO < 4 槽时丢弃（保护万里扬协议帧优先）
+      └─ 每个 logid 一个 packed struct
+```
+
+**特点**: 
+- 串口和 CAN 完全独立，互不影响
+- 所有串口命令和日志保持不变
+- CAN 日志为二进制格式，带宽利用率高
+- 32B FIFO 约束，所有调试帧 ≤ 32B
+
+### 已知限制
+1. **Flash 写入超时**: `FLASH_WRITE` 和 `PHASE_COMP_SAVE` 需要 >200ms（计划改为异步模式）
+2. **异步事件未接入**: bwtest/Cali 完成事件 (0x7E3) 尚未在 foc_bsp.c 中触发
+3. **OTA 通道**: 0x7E4/0x7E5 已设计但未实现
+
 ## 代码结构
 
 ### 核心模块

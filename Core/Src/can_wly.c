@@ -201,23 +201,26 @@ static int32_t tq_nm_to_iq(float nm) {
     return (int32_t)(can_wly_Nm_to_iA(nm) * 1024.0f);
 }
 
-/* ========== 0x100+ID 状态帧 (27 字节, FDCAN 自动 padding 到 32B) ==========
- * D[0..2]   POS 反馈 [23:0] (float->定点, 按 PosMin/Max)
- * D[3..4]   VEL 反馈 [15:0] (float->定点, 按 SpdMin/Max)
- * D[5..6]   T   反馈 [15:0] (float->定点, 按 TqMin/Max, 来自 Iq 滤波 + Kt LUT)
- * D[7..8]   ERR1[15:0]
- * D[9]      ERR2
- * D[10]     WARN
- * D[11]     STA (Bit0=使能, Bit1=故障, Bit2=警告, Bit3=到达)
- * D[12..14] POS 指令 [23:0] (position_ref → PosMin/Max 24bit)
- * D[15..16] VEL 指令 [15:0] (velocity_ref → SpdMin/Max 16bit)
- * D[17..18] T   指令 [15:0] (上位机最近一次 0x300/0x500 下发的 N·m, TqMin/Max 16bit)
- * D[19..20] Iq  指令 [15:0] (int16, 0.01A, 量程 ±327.67A)
- * D[21..22] Iq  反馈 [15:0] (int16, 0.01A, 来自 s_iq_fb_filt_q10)
- * D[23..24] Ia  相电流 [15:0] (int16, 0.01A, 来自 controller.I_a)
- * D[25..26] MIT t_ff [15:0] (mit_t_ff[A] 过 Kt LUT → N·m, TqMin/Max 16bit)
+/* ========== 0x100+ID 状态帧 (33 字节, FDCAN 自动 padding 到 48B) ==========
+ * D[0..2]   Pact 反馈 [23:0] (float->定点, 按 PosMin/Max)
+ * D[3..4]   Vact 反馈 [15:0] (float->定点, 按 SpdMin/Max)
+ * D[5..6]   Tact 反馈 [15:0] (float->定点, 按 TqMin/Max, 来自 Iq 滤波 + Kt LUT)
+ * D[7..8]   Err1[15:0]
+ * D[9..10]  Err2[15:0] (扩展为 uint16, 高字节保留)
+ * D[11]     warn (Bit0=MOS过温, Bit1=电机过温)
+ * D[12]     STA (Bit0=使能, Bit1=故障, Bit2=警告, Bit3=到达)
+ * D[13..15] Pcmd 指令 [23:0] (position_ref → PosMin/Max 24bit)
+ * D[16..17] Vcmd 指令 [15:0] (velocity_ref → SpdMin/Max 16bit)
+ * D[18..19] Tcmd 指令 [15:0] (上位机最近一次 0x300/0x500 下发的 N·m, TqMin/Max 16bit)
+ * D[20..21] iqref [15:0] (uint16, = iqref_A * 100 + 10000, 量程 -100A~+555A)
+ * D[22..23] iqfdb [15:0] (uint16, = iqfdb_A * 100 + 10000, 来自 s_iq_fb_filt_q10)
+ * D[24..25] Irms  [15:0] (uint16, = Irms_A * 100 + 10000)
+ * D[26..27] MIT_T [15:0] (mit_t_ff[A] 过 Kt LUT → N·m, TqMin/Max 16bit)
+ * D[28]     Vdc (uint8, 母线电压 V, 直接值)
+ * D[29..30] Temp_D [15:0] (int16 LE, 驱动板温度 0.1°C)
+ * D[31..32] Temp_M [15:0] (int16 LE, 电机温度 0.1°C)
  */
-#define CAN_WLY_STATUS_FRAME_LEN 27
+#define CAN_WLY_STATUS_FRAME_LEN 33
 
 static void pack_status_frame(uint8_t *d) {
     float pos_rad = pos_int_to_rad(controller_eyou.real_position_out);
@@ -229,25 +232,33 @@ static void pack_status_frame(uint8_t *d) {
     uint16_t t_int = (uint16_t)float_to_uint(tq_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
 
     uint16_t err1 = (uint16_t)(controller_eyou.ServoErrFlag.All_Flag & 0xFFFF);
-    uint8_t  err2 = (uint8_t)((controller_eyou.ServoErrFlag.All_Flag >> 16) & 0xFF);
+    uint16_t err2 = (uint16_t)((controller_eyou.ServoErrFlag.All_Flag >> 16) & 0xFFFF);
 
     /* WARN: Bit0=MOS过温警告(90°C), Bit1=电机过温警告 */
     uint8_t  warn = 0;
     if (motorProValue.board_temp >= (int16_t)Threshold.TemBoradWarn) warn |= 0x01;
     if (motorProValue.motor_temp >= (int16_t)Threshold.TemMortorWarn) warn |= 0x02;
 
+    /* Pact[23:0] */
     d[0] = p_int & 0xFF;
     d[1] = (p_int >> 8) & 0xFF;
     d[2] = (p_int >> 16) & 0xFF;
+    /* Vact[15:0] */
     d[3] = v_int & 0xFF;
     d[4] = (v_int >> 8) & 0xFF;
+    /* Tact[15:0] */
     d[5] = t_int & 0xFF;
     d[6] = (t_int >> 8) & 0xFF;
+    /* Err1[15:0] */
     d[7] = err1 & 0xFF;
     d[8] = (err1 >> 8) & 0xFF;
-    d[9] = err2;
-    d[10] = warn;
+    /* Err2[15:0] */
+    d[9] = err2 & 0xFF;
+    d[10] = (err2 >> 8) & 0xFF;
+    /* warn */
+    d[11] = warn;
 
+    /* STA */
     uint8_t sta = 0;
     if (controller_eyou.foc_run) sta |= 0x01;                       /* Bit0: 使能 */
     if (controller_eyou.ServoErrFlag.All_Flag) sta |= 0x02;         /* Bit1: 故障 */
@@ -255,48 +266,71 @@ static void pack_status_frame(uint8_t *d) {
     if (controller_eyou.ServoState.Bit.PositionArrivedFlag ||
         controller_eyou.ServoState.Bit.SpeedArrivedFlag ||
         controller_eyou.ServoState.Bit.CurrentArrivedFlag) sta |= 0x08;  /* Bit3: 到达 */
-    d[11] = sta;
+    d[12] = sta;
 
     /* ===== 扩展字段: 指令 + 反馈细分 ===== */
-    /* POS 指令: 输出端 1°/1024 → rad → 24bit */
+    /* Pcmd 指令: 输出端 1°/1024 → rad → 24bit */
     float pos_ref_rad = pos_int_to_rad(controller_eyou.position_ref);
     uint32_t p_ref_u = float_to_uint(pos_ref_rad, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
-    d[12] = p_ref_u & 0xFF;
-    d[13] = (p_ref_u >> 8) & 0xFF;
-    d[14] = (p_ref_u >> 16) & 0xFF;
+    d[13] = p_ref_u & 0xFF;
+    d[14] = (p_ref_u >> 8) & 0xFF;
+    d[15] = (p_ref_u >> 16) & 0xFF;
 
-    /* VEL 指令: velocity_ref (电机端 rpm*1024*GR) → 输出端 rad/s → 16bit */
+    /* Vcmd 指令: velocity_ref (电机端 rpm*1024*GR) → 输出端 rad/s → 16bit */
     float vel_ref_rad_s = (float)controller_eyou.velocity_ref / (1024.0f * CAN_WLY_GR) * RPM_TO_RAD_S;
     uint16_t v_ref_u = (uint16_t)float_to_uint(vel_ref_rad_s, g_can_wly_lim.spd_min, g_can_wly_lim.spd_max, 16);
-    d[15] = v_ref_u & 0xFF;
-    d[16] = (v_ref_u >> 8) & 0xFF;
+    d[16] = v_ref_u & 0xFF;
+    d[17] = (v_ref_u >> 8) & 0xFF;
 
-    /* T 指令: 上位机最近一次下发原始 N·m (无 LUT 反推, 量化误差最小) */
+    /* Tcmd 指令: 上位机最近一次下发原始 N·m (无 LUT 反推, 量化误差最小) */
     uint16_t t_cmd_u = (uint16_t)float_to_uint(s_last_torque_cmd_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
-    d[17] = t_cmd_u & 0xFF;
-    d[18] = (t_cmd_u >> 8) & 0xFF;
+    d[18] = t_cmd_u & 0xFF;
+    d[19] = (t_cmd_u >> 8) & 0xFF;
 
-    /* Iq 指令 / Iq 反馈 / Ia 相电流: Q10 → 0.01A int16 (量程 ±327.67A)
-     * Q10 * 100 / 1024 = 0.01A; 直接发电流值, 上位机要扭矩自行乘 Kt
-     * 避免 Kt LUT 在大电流段的非线性量化损失精度 */
-    int16_t iq_ref_001a = (int16_t)((controller_eyou.I_q_ref * 100) / 1024);
-    d[19] = (uint16_t)iq_ref_001a & 0xFF;
-    d[20] = ((uint16_t)iq_ref_001a >> 8) & 0xFF;
+    /* iqref / iqfdb / Irms: A → uint16 = A * 100 + 10000
+     * 量程: (0..65535 - 10000) / 100 = -100A ~ +555A */
+    float iq_ref_A = (float)controller_eyou.I_q_ref / 1024.0f;
+    uint16_t iq_ref_u = (uint16_t)(iq_ref_A * 100.0f + 10000.0f);
+    d[20] = iq_ref_u & 0xFF;
+    d[21] = (iq_ref_u >> 8) & 0xFF;
 
-    int16_t iq_fb_001a = (int16_t)((s_iq_fb_filt_q10 * 100) / 1024);
-    d[21] = (uint16_t)iq_fb_001a & 0xFF;
-    d[22] = ((uint16_t)iq_fb_001a >> 8) & 0xFF;
+    float iq_fb_A = (float)s_iq_fb_filt_q10 / 1024.0f;
+    uint16_t iq_fb_u = (uint16_t)(iq_fb_A * 100.0f + 10000.0f);
+    d[22] = iq_fb_u & 0xFF;
+    d[23] = (iq_fb_u >> 8) & 0xFF;
 
-    int16_t ia_001a = (int16_t)((controller_eyou.I_a * 100) / 1024);
-    d[23] = (uint16_t)ia_001a & 0xFF;
-    d[24] = ((uint16_t)ia_001a >> 8) & 0xFF;
+    /* Irms: 用 |Iq_filt| 近似 RMS (单相控制) */
+    int32_t iq_abs = s_iq_fb_filt_q10;
+    if (iq_abs < 0) iq_abs = -iq_abs;
+    float irms_A = (float)iq_abs / 1024.0f;
+    uint16_t irms_u = (uint16_t)(irms_A * 100.0f + 10000.0f);
+    d[24] = irms_u & 0xFF;
+    d[25] = (irms_u >> 8) & 0xFF;
 
-    /* MIT t_ff: 是 float A (q轴电流前馈), 走 Kt LUT → N·m → 16bit
-     * 与 D[17..18] T 指令同量纲, 便于直接对比"上位机扭矩指令 vs MIT 解算前馈" */
+    /* MIT_T: mit_t_ff[A] 走 Kt LUT → N·m → 16bit
+     * 与 D[18..19] Tcmd 同量纲, 便于直接对比"上位机扭矩指令 vs MIT 解算前馈" */
     float mit_tff_nm = can_wly_iA_to_Nm(controller_eyou.mit_t_ff);
     uint16_t mit_tff_u = (uint16_t)float_to_uint(mit_tff_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
-    d[25] = mit_tff_u & 0xFF;
-    d[26] = (mit_tff_u >> 8) & 0xFF;
+    d[26] = mit_tff_u & 0xFF;
+    d[27] = (mit_tff_u >> 8) & 0xFF;
+
+    /* Vdc: 母线电压 V, uint8 直接值 (量程 0~255V)
+     * g_vdc_raw 是 16位 ADC 平均值 (2 次采样), 按 adc.c:499 公式:
+     * V_bus = raw * 33 * 21 / 65535 / 10  (分压比 21:1, ADC 3.3V 满量程)
+     * 简化: V_bus = raw * 0.01071... ≈ raw * 11 / 1024 */
+    extern volatile uint32_t g_vdc_raw;
+    uint16_t vdc_V = (uint16_t)((g_vdc_raw * 33UL * 21UL) / (65535UL * 10UL));
+    uint8_t vdc_u8 = (vdc_V > 255) ? 255 : (uint8_t)vdc_V;
+    d[28] = vdc_u8;
+
+    /* Temp_D / Temp_M: int16 °C → 0.1°C (有符号, 负温度也正确) */
+    int16_t temp_d = motorProValue.board_temp * 10;
+    d[29] = temp_d & 0xFF;
+    d[30] = (temp_d >> 8) & 0xFF;
+
+    int16_t temp_m = motorProValue.motor_temp * 10;
+    d[31] = temp_m & 0xFF;
+    d[32] = (temp_m >> 8) & 0xFF;
 }
 
 static void send_status_frame(void) {

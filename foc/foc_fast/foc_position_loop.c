@@ -14,7 +14,7 @@
 /* 默认梯形规划: 100 output rpm 巡航 / 200 output rpm/s 加速.
  * VMAX 不超过 DEFAULT_MAX_SPEED=110rpm, 留 10% 余量给速度环跟踪。 */
 #define POS_TRAPEZOID_DEFAULT_VMAX_RPM   100.0f
-#define POS_TRAPEZOID_DEFAULT_AMAX_RPS   200.0f
+#define POS_TRAPEZOID_DEFAULT_AMAX_RPS   50.0f
 /* output rpm → LSB/tick 系数 (位置环 Ts = 1/2500 s) */
 #define POS_TRAPEZOID_VMAX_SCALE         (6.0f * 1024.0f / 2500.0f)              /* ≈ 2.4576 */
 #define POS_TRAPEZOID_AMAX_SCALE         (6.0f * 1024.0f / (2500.0f * 2500.0f))  /* ≈ 9.830e-4 */

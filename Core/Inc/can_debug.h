@@ -41,10 +41,13 @@ typedef enum {
 #define CAN_DBG_CMD_POS_PID_SET     0x22
 #define CAN_DBG_CMD_FLASH_WRITE     0x40
 #define CAN_DBG_CMD_FLASH_ERASE     0x41
+#define CAN_DBG_CMD_FLASH_COMPARE   0x42
 #define CAN_DBG_CMD_FAULT_CLR       0x43
 #define CAN_DBG_CMD_ENABLE          0x50
 #define CAN_DBG_CMD_PHASE_COMP_SET  0x52
 #define CAN_DBG_CMD_PHASE_COMP_SAVE 0x53
+#define CAN_DBG_CMD_CALI            0x5F
+#define CAN_DBG_CMD_BWTEST          0x60
 #define CAN_DBG_CMD_CANRXDBG        0x61
 
 /* Event ID */

@@ -1,0 +1,60 @@
+Listening for 5.0s... (Ctrl+C to stop)
+[LOG   50 seq= 15 ts=30894] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq= 16 ts=30994] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq= 17 ts=31094] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq= 18 ts=31194] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq= 19 ts=31294] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq= 20 ts=31394] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq= 21 ts=31494] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq= 97 ts=39094] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq= 98 ts=39194] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq= 99 ts=39294] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=100 ts=39394] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=101 ts=39494] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=102 ts=39594] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=103 ts=39694] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=104 ts=39794] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=105 ts=39894] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=106 ts=39994] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=107 ts=40094] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=108 ts=40194] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=109 ts=40294] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=110 ts=40394] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=111 ts=40494] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=112 ts=40594] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=113 ts=40694] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=114 ts=40794] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=115 ts=40894] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=116 ts=40994] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=117 ts=41094] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=118 ts=41194] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=119 ts=41294] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=120 ts=41394] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=121 ts=41494] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=122 ts=41594] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=123 ts=41694] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=124 ts=41794] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=125 ts=41894] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=126 ts=41994] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=127 ts=42094] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=128 ts=42194] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=129 ts=42294] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=130 ts=42394] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=131 ts=42494] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=132 ts=42594] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=133 ts=42694] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=134 ts=42794] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=135 ts=42894] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=136 ts=42994] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=137 ts=43094] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=138 ts=43194] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=139 ts=43294] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=140 ts=43394] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=141 ts=43494] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=142 ts=43594] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=143 ts=43694] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=144 ts=43794] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=145 ts=43894] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=146 ts=43994] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+[LOG   50 seq=147 ts=44094] {'v_ref_rpm': 0, 'v_ref_filt_rpm': 0, 'v_fb_motor_rpm': 0, 'v_fb_load_rpm': 0, 'v_err_rpm': 0}
+Created recv thread for dev[0] ch[0], handle=0000000000000340

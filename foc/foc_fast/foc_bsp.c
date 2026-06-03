@@ -21,6 +21,7 @@
 #include "flash_port.h"
 #include "fdcan.h"
 #include "can_wly.h"
+#include "can_debug.h"
 #include "stm32h7xx_hal.h"
 #include "ota_app.h"
 #include <string.h>
@@ -1119,6 +1120,7 @@ void dbg_log_print(void) {
                controller_eyou.real_position_out,
                controller_eyou.real_position,
                controller_eyou.dtheta_mech / 1024);
+        can_debug_send_log();  // CAN 双路输出
         break;
     case 11: {
         /* 输出端编码器调试：检查 inner_raw 是否更新 */
@@ -1135,6 +1137,7 @@ void dbg_log_print(void) {
     }
     case 30:
         printf("current_get: %d,%d\r\n", controller_eyou.V_q, controller_eyou.V_d);
+        can_debug_send_log();  // CAN 双路输出
         break;
     case 40:
         /* I_q 用对外上报的 LPF 值 (~200Hz fc), 避免 PWM 纹波抽样混叠;
@@ -1147,6 +1150,7 @@ void dbg_log_print(void) {
                controller_eyou.I_q_ref,
                controller_eyou.I_d_ref,
                controller_eyou.I_q_ref_filterd);
+        can_debug_send_log();  // CAN 双路输出
         break;
     case 50:
         /* 列1=指令(rpm), 列2=斜坡后指令(rpm), 列3=电机端速度(rpm),
@@ -1157,15 +1161,19 @@ void dbg_log_print(void) {
                controller_eyou.dtheta_mech / 1024,
                (controller_eyou.dtheta_mech / 1024) / 25,
                (controller_eyou.velocity_ref - controller_eyou.dtheta_mech) / 1024);
+        can_debug_send_log();  // CAN 双路输出
         break;
     case 60:
         printf("%d, %d, %d\r\n", controller_eyou.CCR2, controller_eyou.CCR3, controller_eyou.CCR4);
+        can_debug_send_log();  // CAN 双路输出
         break;
     case 70:
         printf("%d, %d, %d, %d, %d, %d\r\n", controller_eyou.CCR2, controller_eyou.CCR3, controller_eyou.CCR4, controller_eyou.I_a, controller_eyou.I_b, controller_eyou.I_c);
+        can_debug_send_log();  // CAN 双路输出
         break;
     case 90:
         printf("%d, %d, %d\r\n", controller_eyou.Ia_raw, controller_eyou.Ib_raw, controller_eyou.Ic_raw);
+        can_debug_send_log();  // CAN 双路输出
         break;
     case 100:
         printf("position: %f, %f, %f, %d\r\n",
@@ -1173,6 +1181,7 @@ void dbg_log_print(void) {
                controller_eyou.real_position_out / 1024.0,
                (controller_eyou.position_ref - controller_eyou.real_position_out) / 1024.0,
                controller_eyou.FlashData.mech_offest_out);
+        can_debug_send_log();  // CAN 双路输出
         break;
     case 110: {
         /* ADC ISR 分段耗时（us, 480MHz → 1us=480 cycles）

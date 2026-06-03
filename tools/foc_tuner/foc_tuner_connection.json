@@ -1,0 +1,8 @@
+{
+  "backend": "CAN-FD",
+  "port": "COM4",
+  "baud": "921600",
+  "can_channel": "0",
+  "can_abit": "1000000",
+  "can_dbit": "5000000"
+}

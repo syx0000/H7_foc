@@ -111,6 +111,10 @@ class MainWindow(QMainWindow):
         self._serial.sig_error.connect(self._on_error)
         self._serial.sig_connected.connect(self._on_connected)
         self._control_panel.sig_command.connect(self._send)
+        self._control_panel.sig_wly_speed.connect(self._send_wly_speed)
+        self._control_panel.sig_wly_position.connect(self._send_wly_position)
+        self._control_panel.sig_wly_torque.connect(self._send_wly_torque)
+        self._control_panel.sig_wly_enable.connect(self._send_wly_enable)
         self._control_panel._logid_combo.currentIndexChanged.connect(self._on_logid_changed)
         self._pid_panel.sig_command.connect(self._send)
         self._bw_panel.sig_command.connect(self._send)
@@ -137,6 +141,9 @@ class MainWindow(QMainWindow):
         backend == 'serial': params = {port, baud}
         backend == 'can':    params = {channel, abit, dbit}
         """
+        # 通知 Motor Control 面板当前后端类型
+        self._control_panel.set_backend(backend)
+
         if backend == "serial":
             self._active_worker = self._serial
             self._serial.connect_port(params["port"], params["baud"])
@@ -164,6 +171,30 @@ class MainWindow(QMainWindow):
         """Forward command to active worker (Serial or CAN)."""
         if self._active_worker:
             self._active_worker.send(cmd)
+
+    @Slot(float)
+    def _send_wly_speed(self, speed_rpm: float):
+        """发送万里扬速度指令 (仅 CAN 模式)."""
+        if hasattr(self._active_worker, 'send_wly_speed'):
+            self._active_worker.send_wly_speed(speed_rpm)
+
+    @Slot(float, float)
+    def _send_wly_position(self, pos_deg: float, speed_rpm: float):
+        """发送万里扬位置指令 (仅 CAN 模式)."""
+        if hasattr(self._active_worker, 'send_wly_position'):
+            self._active_worker.send_wly_position(pos_deg, speed_rpm)
+
+    @Slot(float)
+    def _send_wly_torque(self, torque_nm: float):
+        """发送万里扬转矩指令 (仅 CAN 模式)."""
+        if hasattr(self._active_worker, 'send_wly_torque'):
+            self._active_worker.send_wly_torque(torque_nm)
+
+    @Slot(bool)
+    def _send_wly_enable(self, enable: bool):
+        """发送万里扬使能控制 (仅 CAN 模式)."""
+        if hasattr(self._active_worker, 'send_wly_enable'):
+            self._active_worker.send_wly_enable(enable)
 
     @Slot()
     def _on_reset_request(self):
