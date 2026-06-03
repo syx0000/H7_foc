@@ -181,8 +181,11 @@ HAL_StatusTypeDef fdcan_send(uint32_t std_id, const uint8_t *data, uint32_t len)
     tx.TxFrameType         = FDCAN_DATA_FRAME;
     tx.DataLength          = dlc_table[idx];
     tx.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-    tx.BitRateSwitch       = (pad_len > 8) ? FDCAN_BRS_ON : FDCAN_BRS_OFF;
-    tx.FDFormat            = (pad_len > 8) ? FDCAN_FD_CAN : FDCAN_CLASSIC_CAN;
+    /* 全部帧统一走 CAN-FD + BRS, 8B 帧也用 FD 数据相位 (8Mbit/s) 压短帧时长,
+     * 让 0x7FD 10kHz 逐拍上报 (~30µs/帧) 不会撞 TX FIFO. 总线上不能有
+     * 仅经典 CAN 的节点, 否则会全部失联 */
+    tx.BitRateSwitch       = FDCAN_BRS_ON;
+    tx.FDFormat            = FDCAN_FD_CAN;
     tx.TxEventFifoControl  = FDCAN_NO_TX_EVENTS;
     tx.MessageMarker       = 0;
 
