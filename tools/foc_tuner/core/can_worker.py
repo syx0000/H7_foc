@@ -38,12 +38,15 @@ class CanWorker(QThread):
     sig_line_received = Signal(str)   # Translated text line (no \r\n)
     sig_error = Signal(str)           # Error message
     sig_connected = Signal(bool)      # Connection state changed
+    sig_can_rx_raw = Signal(int, bytes, int)  # (can_id, data, ts_us) — 原始 RX 帧
+    sig_can_tx_raw = Signal(int, bytes, int)  # (can_id, data, ts_us=0) — 原始 TX 帧
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._bus: CXCanFD | None = None
         self._running = False
         self._mutex = QMutex()
+        self._promiscuous = False  # True = 收全部 ID, False = 仅 0x7E0~0x7EF
 
     def connect_port(self, channel: int = 0, abit: int = 1_000_000, dbit: int = 5_000_000):
         """Open CAN-FD device.
@@ -55,8 +58,11 @@ class CanWorker(QThread):
         """
         try:
             self._bus = CXCanFD(channel=channel, abit=abit, dbit=dbit)
-            # 限制接收 0x7E0~0x7EF, 屏蔽万里扬流量
-            self._bus.set_filter(proto.ID_CMD, 0x7EF, std=True)
+            # 限制接收 0x7E0~0x7EF, 屏蔽万里扬流量 (除非开了混杂模式)
+            if self._promiscuous:
+                self._bus.set_filter(0x000, 0x7FF, std=True)
+            else:
+                self._bus.set_filter(proto.ID_CMD, 0x7EF, std=True)
             self._running = True
             self.start()
             self.sig_connected.emit(True)
@@ -65,6 +71,31 @@ class CanWorker(QThread):
             traceback.print_exc()
             self.sig_error.emit(f"Failed to open CAN ch={channel}: {e}")
             self.sig_connected.emit(False)
+
+    def set_promiscuous(self, enable: bool):
+        """切换混杂接收模式. enable=True 收全部 0x000~0x7FF, False 仅收 0x7E0~0x7EF.
+        必须在已连接的状态下调用才会立即生效."""
+        self._promiscuous = enable
+        if self._bus:
+            try:
+                if enable:
+                    self._bus.set_filter(0x000, 0x7FF, std=True)
+                else:
+                    self._bus.set_filter(proto.ID_CMD, 0x7EF, std=True)
+            except Exception as e:
+                self.sig_error.emit(f"set_filter failed: {e}")
+
+    def _send_can(self, can_id: int, data: bytes, *, brs: bool = True) -> bool:
+        """统一 TX 入口: 调 _bus.send 同时 emit sig_can_tx_raw, 让流量面板能记录 TX."""
+        if not self._bus:
+            return False
+        ok = self._bus.send(can_id, data, brs=brs)
+        # emit 给流量面板 (TX 没有真实硬件时间戳, 用 0 占位, 面板自己打主机时间)
+        try:
+            self.sig_can_tx_raw.emit(int(can_id), bytes(data), 0)
+        except Exception:
+            pass
+        return ok
 
     def disconnect_port(self):
         self._running = False
@@ -107,19 +138,19 @@ class CanWorker(QThread):
                         else:
                             vals.append(0)
                     frame = proto.pack_phase_comp_set(*vals)
-                    self._bus.send(proto.ID_CMD, frame)
+                    self._send_can(proto.ID_CMD, frame)
                     return
                 # 其他多行命令：逐个发送
                 for line in lines:
                     frame = self._translate_cmd(line)
                     if frame:
-                        self._bus.send(proto.ID_CMD, frame)
+                        self._send_can(proto.ID_CMD, frame)
                 return
 
             frame = self._translate_cmd(cmd.rstrip('\r\n'))
             if frame is None:
                 return  # _translate_cmd 已经发出了错误信号或命令不支持
-            self._bus.send(proto.ID_CMD, frame)
+            self._send_can(proto.ID_CMD, frame)
         except Exception as e:
             self.sig_error.emit(f"CAN send error: {e}")
         finally:
@@ -146,7 +177,7 @@ class CanWorker(QThread):
             v_raw = int((v_rad_s - v_min) / (v_max - v_min) * 65535.0)
             v_raw = max(0, min(65535, v_raw))
             frame = bytes([v_raw & 0xFF, (v_raw >> 8) & 0xFF, node_id])
-            self._bus.send(0x200, frame, brs=True)
+            self._send_can(0x200, frame, brs=True)
         except Exception as e:
             self.sig_error.emit(f"CAN send_wly_speed error: {e}")
         finally:
@@ -191,7 +222,7 @@ class CanWorker(QThread):
                 (v_raw >> 8) & 0xFF,
                 node_id
             ])
-            self._bus.send(0x400, frame, brs=True)
+            self._send_can(0x400, frame, brs=True)
         except Exception as e:
             self.sig_error.emit(f"CAN send_wly_position error: {e}")
         finally:
@@ -216,7 +247,7 @@ class CanWorker(QThread):
             t_raw = int((torque_nm - t_min) / (t_max - t_min) * 65535.0)
             t_raw = max(0, min(65535, t_raw))
             frame = bytes([t_raw & 0xFF, (t_raw >> 8) & 0xFF, node_id])
-            self._bus.send(0x300, frame, brs=True)
+            self._send_can(0x300, frame, brs=True)
         except Exception as e:
             self.sig_error.emit(f"CAN send_wly_torque error: {e}")
         finally:
@@ -234,7 +265,7 @@ class CanWorker(QThread):
             cmd_byte = 0xFA if enable else 0xFB
             frame = bytes([0xFF] * 7 + [cmd_byte])
             can_id = 0x700 + node_id
-            self._bus.send(can_id, frame, brs=True)
+            self._send_can(can_id, frame, brs=True)
         except Exception as e:
             self.sig_error.emit(f"CAN send_wly_enable error: {e}")
         finally:
@@ -248,11 +279,119 @@ class CanWorker(QThread):
                 return
             frame = bytes([0xFF] * 7 + [0xFD])
             can_id = 0x700 + node_id
-            self._bus.send(can_id, frame, brs=True)
+            self._send_can(can_id, frame, brs=True)
         except Exception as e:
             self.sig_error.emit(f"CAN send_wly_clr_err error: {e}")
         finally:
             self._mutex.unlock()
+
+    # ============== CAN OTA 支持 ==============
+    OTA_CHUNK_SIZE = 24  # CAN-FD 32B FIFO 限制 - 4B 头 - 2B CRC = 26B (留 2B 余量)
+
+    def ota_upload(self, firmware_bytes: bytes, version: int = 0x010000,
+                   progress_callback=None) -> bool:
+        """通过 CAN 上传固件并烧录.
+
+        Args:
+            firmware_bytes: 完整固件二进制
+            version: 版本号 (uint32, 默认 1.0.0)
+            progress_callback: 进度回调 (current, total) -> None
+        Returns:
+            True if success, False otherwise.
+        """
+        import zlib
+        if not self._bus:
+            self.sig_error.emit("CAN OTA: bus not connected")
+            return False
+
+        size = len(firmware_bytes)
+        crc32 = zlib.crc32(firmware_bytes) & 0xFFFFFFFF
+        self.sig_line_received.emit(f"OTA: starting size={size} crc32=0x{crc32:08X}")
+
+        # 1. 发送 OTA_BEGIN 命令
+        self._mutex.lock()
+        try:
+            frame = proto.pack_ota_begin(size, crc32, version)
+            self._send_can(proto.ID_CMD, frame)
+        finally:
+            self._mutex.unlock()
+
+        # 等待 OTA_BEGIN 响应（OTA ready 文本帧或 RESP 0x70 OK）
+        # MCU 擦除 7 个 Flash sector 需要 ~3-5s, 等待最多 15s
+        if not self._wait_ota_ready(timeout_s=15.0):
+            self.sig_error.emit("CAN OTA: timeout waiting for OTA ready")
+            return False
+
+        # 2. 分片发送数据
+        n_chunks = (size + self.OTA_CHUNK_SIZE - 1) // self.OTA_CHUNK_SIZE
+        for i in range(n_chunks):
+            offset = i * self.OTA_CHUNK_SIZE
+            chunk = firmware_bytes[offset:offset + self.OTA_CHUNK_SIZE]
+            seq = i & 0xFFFF
+            ok = self._send_ota_chunk(seq, chunk, retry=3)
+            if not ok:
+                self.sig_error.emit(f"CAN OTA: failed at chunk {seq}")
+                self._send_ota_abort()
+                return False
+            if progress_callback:
+                progress_callback(offset + len(chunk), size)
+
+        # 3. 发送 OTA_END 命令
+        self._mutex.lock()
+        try:
+            self._send_can(proto.ID_CMD, proto.pack_ota_end())
+        finally:
+            self._mutex.unlock()
+
+        self.sig_line_received.emit("OTA: all chunks sent, finalizing...")
+        return True
+
+    def _send_ota_chunk(self, seq: int, payload: bytes, retry: int = 3) -> bool:
+        """发送单个 OTA 数据帧, 等待 ACK. 返回是否成功."""
+        for attempt in range(retry):
+            self._mutex.lock()
+            try:
+                frame = proto.pack_ota_data_frame(seq, payload)
+                self._send_can(proto.ID_OTA_DATA, frame, brs=True)
+            finally:
+                self._mutex.unlock()
+            # 等待 ACK (在主接收线程中处理)
+            if self._wait_ota_ack(seq, timeout_s=1.0):
+                return True
+            self.sig_error.emit(f"OTA chunk {seq}: retry {attempt+1}/{retry}")
+        return False
+
+    def _send_ota_abort(self):
+        """发送 OTA_ABORT 命令."""
+        self._mutex.lock()
+        try:
+            if self._bus:
+                self._send_can(proto.ID_CMD, proto.pack_ota_abort())
+        finally:
+            self._mutex.unlock()
+
+    def _wait_ota_ready(self, timeout_s: float) -> bool:
+        """轮询 _ota_ready_flag (由主接收线程在收到 'OTA ready' 时设为 True)."""
+        import time
+        self._ota_ready_flag = False
+        t_end = time.monotonic() + timeout_s
+        while time.monotonic() < t_end:
+            if getattr(self, '_ota_ready_flag', False):
+                return True
+            time.sleep(0.01)
+        return False
+
+    def _wait_ota_ack(self, expected_seq: int, timeout_s: float) -> bool:
+        """轮询 _ota_last_ack_seq (由主接收线程在收到 ACK 时更新)."""
+        import time
+        self._ota_pending_seq = expected_seq
+        self._ota_last_ack_seq = -1
+        t_end = time.monotonic() + timeout_s
+        while time.monotonic() < t_end:
+            if self._ota_last_ack_seq == expected_seq:
+                return True
+            time.sleep(0.001)
+        return False
 
     # ---------- 命令文本 -> 0x7E0 二进制 ----------
     def _translate_cmd(self, cmd: str) -> bytes | None:
@@ -361,7 +500,12 @@ class CanWorker(QThread):
                 continue
             if rx is None:
                 continue
-            cid, data, _ = rx
+            cid, data, ts_us = rx
+            # emit 原始 RX 帧给流量面板
+            try:
+                self.sig_can_rx_raw.emit(int(cid), bytes(data), int(ts_us))
+            except Exception:
+                pass
             try:
                 line = self._translate_rx(cid, data)
             except Exception as e:
@@ -374,10 +518,24 @@ class CanWorker(QThread):
         """Convert binary CAN frame -> printf-style text line."""
         if cid == proto.ID_LOG:
             return self._log_to_text(data)
+        if cid == proto.ID_OTA_ACK:
+            # 0x7E5 OTA ACK: [type:u8][seq:u16 LE][reason:u8]
+            if len(data) >= 4:
+                ack_type = data[0]
+                seq = data[1] | (data[2] << 8)
+                if ack_type == 0x00:  # ACK
+                    self._ota_last_ack_seq = seq
+                else:  # NAK
+                    self._ota_last_ack_seq = -1
+                    return f"[OTA NAK] seq={seq} reason=0x{data[3]:02X}"
+            return None
         if cid == proto.ID_TEXT:
             # 0x7E6 文本帧：直接返回字符串
             try:
                 text = data.decode('utf-8', errors='replace').rstrip('\x00\r\n')
+                # 检测 OTA ready 信号
+                if text == "OTA ready":
+                    self._ota_ready_flag = True
                 return text
             except Exception:
                 return None

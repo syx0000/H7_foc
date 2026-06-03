@@ -29,7 +29,9 @@ class MaintenancePanel(QWidget):
         super().__init__(parent)
 
         self._serial = serial_worker
+        self._active_worker = serial_worker  # 由 main_window 在切换后端时更新
         self._uploader: OTAUploader | None = None
+        self._can_ota_thread = None
 
         self._bin_path: str | None = None
         self._bin_size: int = 0
@@ -53,6 +55,10 @@ class MaintenancePanel(QWidget):
         layout.addWidget(log_group)
 
         layout.addStretch()
+
+    def set_active_worker(self, worker):
+        """由 main_window 在切换后端时调用，更新 OTA 使用的 worker."""
+        self._active_worker = worker
 
     # ------------------------------------------------------------------ Cali
 
@@ -249,6 +255,11 @@ class MaintenancePanel(QWidget):
             f"({len(bin_data)} B, crc=0x{self._bin_crc32:08X})"
         )
 
+        # 检测当前后端: CanWorker 有 ota_upload 方法
+        if hasattr(self._active_worker, 'ota_upload'):
+            self._start_can_ota(bin_data)
+            return
+
         self._uploader = OTAUploader(
             serial_worker=self._serial,
             bin_data=bin_data,
@@ -260,6 +271,42 @@ class MaintenancePanel(QWidget):
         self._uploader.sig_status.connect(self._append_log)
         self._uploader.sig_done.connect(self._on_upload_done)
         self._uploader.start()
+
+    def _start_can_ota(self, bin_data: bytes):
+        """启动 CAN OTA 后台线程."""
+        from PySide6.QtCore import QThread
+
+        worker = self._active_worker
+        version = self._version_spin.value()
+        self._append_log(f">>> CAN OTA mode (CAN-FD)")
+
+        class _CanOtaThread(QThread):
+            sig_progress = Signal(int, int)
+            sig_status = Signal(str)
+            sig_done = Signal(bool, str)
+
+            def __init__(self, w, data, ver):
+                super().__init__()
+                self._w = w
+                self._data = data
+                self._ver = ver
+
+            def run(self):
+                try:
+                    ok = self._w.ota_upload(
+                        self._data,
+                        version=self._ver,
+                        progress_callback=lambda c, t: self.sig_progress.emit(c, t),
+                    )
+                    self.sig_done.emit(ok, "CAN OTA finished" if ok else "CAN OTA failed")
+                except Exception as e:
+                    self.sig_done.emit(False, f"CAN OTA exception: {e}")
+
+        self._can_ota_thread = _CanOtaThread(worker, bin_data, version)
+        self._can_ota_thread.sig_progress.connect(self._on_upload_progress)
+        self._can_ota_thread.sig_status.connect(self._append_log)
+        self._can_ota_thread.sig_done.connect(self._on_upload_done)
+        self._can_ota_thread.start()
 
     def _on_cancel_clicked(self):
         if self._uploader is not None and self._uploader.isRunning():
@@ -295,7 +342,24 @@ class MaintenancePanel(QWidget):
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
-                self.sig_command.emit(build_ota_swap())
+                # 区分后端：CAN vs 串口
+                if hasattr(self._active_worker, 'ota_upload'):
+                    # CAN 模式：发送二进制 OTA_SWAP 命令 (0x73)
+                    try:
+                        import sys, os
+                        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'canfd_console'))
+                        import can_debug_protocol as proto
+                        self._active_worker._mutex.lock()
+                        try:
+                            self._active_worker._bus.send(proto.ID_CMD, proto.pack_ota_swap())
+                        finally:
+                            self._active_worker._mutex.unlock()
+                        self._append_log(">>> Rebooting to bootloader...")
+                    except Exception as e:
+                        self._append_log(f">>> Reboot failed: {e}")
+                else:
+                    # 串口模式
+                    self.sig_command.emit(build_ota_swap())
         else:
             self._append_log(f">>> OTA FAILED: {msg}")
             QMessageBox.warning(self, "Upload failed", msg)

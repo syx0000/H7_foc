@@ -7,6 +7,7 @@
 #include "flash_port.h"
 #include "foc_controller.h"
 #include "ifly_fault.h"
+#include "ota_app.h"
 #include "stm32h7xx_hal.h"
 #include <string.h>
 #include <stdio.h>
@@ -28,6 +29,11 @@ static void send_text(const char *str) {
     uint32_t len = strlen(str);
     if (len > 32) len = 32;  /* CAN 帧限制 */
     fdcan_send(CAN_DBG_ID_TEXT, (const uint8_t*)str, len);
+}
+static void send_ota_ack(uint8_t type, uint16_t seq, uint8_t reason) {
+    /* type: 0x00=ACK, 0x01=NAK, 0xFF=DONE */
+    uint8_t r[4] = {type, seq & 0xFF, (seq >> 8) & 0xFF, reason};
+    fdcan_send(CAN_DBG_ID_OTA_ACK, r, 4);
 }
 static void send_err(uint8_t cmd, can_dbg_err_t e) {
     uint8_t r[3] = {CAN_DBG_ERR_FLAG, cmd, (uint8_t)e};
@@ -408,6 +414,133 @@ static void h_canrxdbg(const uint8_t *d, uint32_t n) {
     send_resp(r,3);
 }
 
+/* ===== CAN OTA 状态 ===== */
+static struct {
+    uint8_t  active;        /* 1=接收中 */
+    uint16_t next_seq;      /* 期望的下一片序号 */
+} s_can_ota = {0, 0};
+
+/* CRC16-MODBUS, 与 ota_app.c 同实现 */
+static uint16_t crc16_modbus_local(const uint8_t *data, uint16_t len) {
+    uint16_t crc = 0xFFFF;
+    for (uint16_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 1) crc = (crc >> 1) ^ 0xA001;
+            else         crc >>= 1;
+        }
+    }
+    return crc;
+}
+
+static void h_ota_begin(const uint8_t *d, uint32_t n) {
+    if (n < 13) {send_err(CAN_DBG_CMD_OTA_BEGIN, CAN_DBG_ERR_BAD_LEN); return;}
+    uint32_t size    = d[1] | (d[2]<<8) | (d[3]<<16) | (d[4]<<24);
+    uint32_t crc32   = d[5] | (d[6]<<8) | (d[7]<<16) | (d[8]<<24);
+    uint32_t version = d[9] | (d[10]<<8) | (d[11]<<16) | (d[12]<<24);
+
+    if (ota_begin(size, crc32, version) != 0) {
+        send_err(CAN_DBG_CMD_OTA_BEGIN, CAN_DBG_ERR_BUSY);
+        send_text("OTA begin FAIL");
+        return;
+    }
+    s_can_ota.active = 1;
+    s_can_ota.next_seq = 0;
+
+    uint8_t r[2] = {CAN_DBG_CMD_OTA_BEGIN, CAN_DBG_OK};
+    send_resp(r, 2);
+    send_text("OTA ready");
+}
+
+static void h_ota_end(const uint8_t *d, uint32_t n) {
+    (void)d;(void)n;
+    s_can_ota.active = 0;
+    if (ota_end() != 0) {
+        send_err(CAN_DBG_CMD_OTA_END, CAN_DBG_ERR_INTERNAL);
+        send_text("OTA end FAIL");
+        return;
+    }
+    uint8_t r[2] = {CAN_DBG_CMD_OTA_END, CAN_DBG_OK};
+    send_resp(r, 2);
+    send_text("OTA done");
+}
+
+static void h_ota_abort(const uint8_t *d, uint32_t n) {
+    (void)d;(void)n;
+    s_can_ota.active = 0;
+    ota_abort();
+    uint8_t r[2] = {CAN_DBG_CMD_OTA_ABORT, CAN_DBG_OK};
+    send_resp(r, 2);
+    send_text("OTA aborted");
+}
+
+static void h_ota_swap(const uint8_t *d, uint32_t n) {
+    (void)d;(void)n;
+    uint8_t r[2] = {CAN_DBG_CMD_OTA_SWAP, CAN_DBG_OK};
+    send_resp(r, 2);
+    send_text("Rebooting to bootloader");
+    HAL_Delay(50);
+    NVIC_SystemReset();
+}
+
+/* ===== CAN OTA 数据帧处理 (从 fdcan_rx_user 直接调用, ISR 上下文)
+ *
+ * 帧格式 (CAN-FD 32B, 受 RX FIFO 限制):
+ *   D[0..1] : seq (u16 LE)
+ *   D[2..3] : len (u16 LE)
+ *   D[4..4+len-1] : payload (最大 24B)
+ *   D[4+len..4+len+1] : crc16 (over D[0..3+len])
+ *
+ * 复用 ota_app.c 的 ring buffer + ota_process(): 把 CAN 帧重组为
+ * 串口 'OD' + seq + len + payload + crc16 的格式喂进去. */
+void can_debug_ota_data_rx(const uint8_t *data, uint32_t len) {
+    if (!s_can_ota.active) return;
+    if (len < 6) {
+        send_ota_ack(0x01, 0xFFFF, CAN_DBG_ERR_BAD_LEN);
+        return;
+    }
+
+    uint16_t seq      = data[0] | (data[1] << 8);
+    uint16_t pay_len  = data[2] | (data[3] << 8);
+
+    if (pay_len > 24 || pay_len + 6 > len) {
+        send_ota_ack(0x01, seq, CAN_DBG_ERR_BAD_LEN);
+        return;
+    }
+
+    /* CRC16 over D[0..3+pay_len] */
+    uint16_t expected = crc16_modbus_local(data, 4 + pay_len);
+    uint16_t actual   = data[4 + pay_len] | (data[4 + pay_len + 1] << 8);
+
+    if (expected != actual) {
+        send_ota_ack(0x01, seq, CAN_DBG_ERR_INTERNAL);
+        return;
+    }
+
+    /* 序号检查 */
+    if (seq != s_can_ota.next_seq) {
+        send_ota_ack(0x01, seq, CAN_DBG_ERR_OUT_OF_RANGE);
+        return;
+    }
+
+    /* 重组为 ota_app.c 期望的格式: 'OD' + seq[2] + len[2] + payload + crc16[2] */
+    uint8_t reframe[6 + 24 + 2];
+    reframe[0] = 'O';
+    reframe[1] = 'D';
+    reframe[2] = data[0]; reframe[3] = data[1];
+    reframe[4] = data[2]; reframe[5] = data[3];
+    memcpy(&reframe[6], &data[4], pay_len);
+    uint16_t new_crc = crc16_modbus_local(reframe, 6 + pay_len);
+    reframe[6 + pay_len]     = new_crc & 0xFF;
+    reframe[6 + pay_len + 1] = (new_crc >> 8) & 0xFF;
+
+    ota_rx_feed(reframe, 6 + pay_len + 2);
+    /* 不在 ISR 中 process (会阻塞 Flash 写入几十 ms), 由主循环 can_debug_poll 处理 */
+
+    s_can_ota.next_seq = (seq + 1) & 0xFFFF;
+    send_ota_ack(0x00, seq, 0);  /* ACK */
+}
+
 /* ===== dispatch ===== */
 static void dispatch(const uint8_t *d, uint32_t n) {
     if (!n) return;
@@ -431,6 +564,10 @@ static void dispatch(const uint8_t *d, uint32_t n) {
     case CAN_DBG_CMD_CALI:       h_cali(d,n); break;
     case CAN_DBG_CMD_BWTEST:     h_bwtest(d,n); break;
     case CAN_DBG_CMD_CANRXDBG:   h_canrxdbg(d,n); break;
+    case CAN_DBG_CMD_OTA_BEGIN:  h_ota_begin(d,n); break;
+    case CAN_DBG_CMD_OTA_END:    h_ota_end(d,n); break;
+    case CAN_DBG_CMD_OTA_ABORT:  h_ota_abort(d,n); break;
+    case CAN_DBG_CMD_OTA_SWAP:   h_ota_swap(d,n); break;
     default: send_err(d[0], CAN_DBG_ERR_UNKNOWN_CMD); break;
     }
 }
@@ -439,7 +576,12 @@ static void dispatch(const uint8_t *d, uint32_t n) {
 void can_debug_init(void) { s_wr=0; s_rd=0; }
 
 void can_debug_rx_isr(uint32_t id, const uint8_t *data, uint32_t len) {
-    (void)id;
+    /* 0x7E4 OTA 数据帧: 直接调用 OTA 处理 (绕过命令队列, 不走 32B 限制) */
+    if (id == CAN_DBG_ID_OTA_DATA) {
+        can_debug_ota_data_rx(data, len);
+        return;
+    }
+    /* 其他命令进队列, 主循环 poll 处理 */
     if (len>32) len=32;
     uint8_t next=(s_wr+1)&(Q_DEPTH-1);
     if (next==s_rd) return;
@@ -449,6 +591,12 @@ void can_debug_rx_isr(uint32_t id, const uint8_t *data, uint32_t len) {
 }
 
 void can_debug_poll(void) {
+    /* OTA 数据处理 (从 ring buffer → Flash, 主循环非阻塞) */
+    if (s_can_ota.active) {
+        ota_process();
+    }
+
+    /* 命令派发 */
     while (s_rd!=s_wr) {
         dispatch((const uint8_t*)s_q[s_rd].data, s_q[s_rd].len);
         s_rd=(s_rd+1)&(Q_DEPTH-1);

@@ -27,6 +27,7 @@ typedef enum {
     CAN_DBG_ERR_BUSY        = 0x04,
     CAN_DBG_ERR_FAULT       = 0x05,
     CAN_DBG_ERR_BRAKE       = 0x06,
+    CAN_DBG_ERR_INTERNAL    = 0x07,
 } can_dbg_err_t;
 
 /* CMD_ID */
@@ -49,6 +50,10 @@ typedef enum {
 #define CAN_DBG_CMD_CALI            0x5F
 #define CAN_DBG_CMD_BWTEST          0x60
 #define CAN_DBG_CMD_CANRXDBG        0x61
+#define CAN_DBG_CMD_OTA_BEGIN       0x70
+#define CAN_DBG_CMD_OTA_END         0x71
+#define CAN_DBG_CMD_OTA_ABORT       0x72
+#define CAN_DBG_CMD_OTA_SWAP        0x73
 
 /* Event ID */
 #define CAN_DBG_EVT_BWTEST_DONE     0x30
@@ -59,6 +64,9 @@ void can_debug_rx_isr(uint32_t id, const uint8_t *data, uint32_t len);
 void can_debug_poll(void);
 void can_debug_send_log(void);
 void can_debug_send_event(uint8_t evt_id, const uint8_t *payload, uint32_t len);
+
+/* CAN OTA: 处理 0x7E4 数据帧 (从 fdcan_rx_user 调用) */
+void can_debug_ota_data_rx(const uint8_t *data, uint32_t len);
 
 #ifdef __cplusplus
 }

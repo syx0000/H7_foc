@@ -20,6 +20,7 @@ from gui.bandwidth_test_panel import BandwidthTestPanel
 from gui.flash_panel import FlashPanel
 from gui.fault_panel import FaultPanel
 from gui.maintenance_panel import MaintenancePanel
+from gui.can_traffic_panel import CanTrafficPanel
 
 
 class MainWindow(QMainWindow):
@@ -70,6 +71,9 @@ class MainWindow(QMainWindow):
 
         self._maint_panel = MaintenancePanel(self._serial)
         left_tabs.addTab(self._maint_panel, "Maintenance")
+
+        self._can_traffic_panel = CanTrafficPanel()
+        left_tabs.addTab(self._can_traffic_panel, "CAN Traffic")
 
         left_split.addWidget(left_tabs)
 
@@ -155,10 +159,14 @@ class MainWindow(QMainWindow):
                 self._can.sig_line_received.connect(self._on_line_received)
                 self._can.sig_error.connect(self._on_error)
                 self._can.sig_connected.connect(self._on_connected)
+                # 连接 CAN Traffic 面板
+                self._can_traffic_panel.set_can_worker(self._can)
             self._active_worker = self._can
             self._can.connect_port(
                 channel=params["channel"], abit=params["abit"], dbit=params["dbit"]
             )
+        # 通知 maintenance_panel 当前 worker (用于 OTA 选择串口/CAN 路径)
+        self._maint_panel.set_active_worker(self._active_worker)
 
     @Slot()
     def _on_disconnect_request(self):
@@ -298,11 +306,11 @@ class MainWindow(QMainWindow):
         - Motor Control (0): compact 180px, waveform takes the rest.
         - PID Tuning (1): natural ~400px, waveform takes the rest. Auto-query
           current PID + phase comp values from MCU.
-        - BW Test / Flash / Faults / Maintenance (2/3/4/5): hide waveform — these
+        - BW Test / Flash / Faults / Maintenance / CAN Traffic (2/3/4/5/6): hide waveform — these
           pages have their own result views and don't need live plots.
         """
         # Tabs that don't need the waveform pane visible
-        WAVEFORM_HIDDEN_TABS = (2, 3, 4, 5)
+        WAVEFORM_HIDDEN_TABS = (2, 3, 4, 5, 6)
 
         # Auto-query on PID tab activation (only if connected)
         if index == 1 and self._serial_panel._connected:

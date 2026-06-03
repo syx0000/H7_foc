@@ -58,6 +58,11 @@ class CMD(IntEnum):
     BWTEST              = 0x60
     # CAN 状态类
     CANRXDBG            = 0x61
+    # OTA
+    OTA_BEGIN           = 0x70
+    OTA_END             = 0x71
+    OTA_ABORT           = 0x72
+    OTA_SWAP            = 0x73
 
 
 # ===== 错误码 =====
@@ -182,6 +187,42 @@ def pack_bwtest(test_id: int) -> bytes:
 def pack_cali() -> bytes:
     """电角度偏置辨识 + Flash 保存"""
     return bytes([CMD.CALI])
+
+
+# ===== OTA =====
+def pack_ota_begin(size: int, crc32: int, version: int) -> bytes:
+    """开始 OTA 会话: 13 字节 = CMD + size:u32 + crc32:u32 + version:u32"""
+    return struct.pack('<BIII', CMD.OTA_BEGIN, size, crc32, version)
+
+
+def pack_ota_end() -> bytes:
+    return bytes([CMD.OTA_END])
+
+
+def pack_ota_abort() -> bytes:
+    return bytes([CMD.OTA_ABORT])
+
+
+def pack_ota_swap() -> bytes:
+    return bytes([CMD.OTA_SWAP])
+
+
+def pack_ota_data_frame(seq: int, payload: bytes) -> bytes:
+    """构造 OTA 数据帧 (0x7E4):
+    [seq:u16 LE][len:u16 LE][payload][crc16:u16 LE]
+    payload 最大 24B (CAN-FD 32B FIFO - 4B 头 - 2B CRC - 2B 余量).
+    """
+    if len(payload) > 24:
+        raise ValueError(f"payload {len(payload)} > 24 (32B FIFO limit)")
+    head = struct.pack('<HH', seq & 0xFFFF, len(payload))
+    body = head + payload
+    # CRC16-MODBUS over [seq + len + payload]
+    crc = 0xFFFF
+    for b in body:
+        crc ^= b
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if (crc & 1) else (crc >> 1)
+    return body + struct.pack('<H', crc & 0xFFFF)
 
 
 # ===== 0x7E2 周期日志解析 =====
