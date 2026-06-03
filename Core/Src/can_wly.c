@@ -48,6 +48,11 @@ static uint32_t s_tx_fail_count = 0;
  * 否则等于在闭环里塞滞后, 影响电流环带宽和稳定裕度 */
 static volatile int32_t s_iq_fb_filt_q10 = 0;
 
+/* 上位机最近一次下发的扭矩指令原始值 (N·m), 仅供 0x100 上报回显
+ * 0x300 PROFILE_TORQUE_MODE / 0x500 MIT_PD_MODE 写入,
+ * 用 s_last_torque_cmd_nm 以源指令为准, 不经过 LUT 反推 */
+static volatile float s_last_torque_cmd_nm = 0.0f;
+
 /* CAN 超时保护：收到有效帧时重置，1ms 递减，归零停机 */
 #define CAN_TIMEOUT_MS 200
 #define MIT_TIMEOUT_MS 20
@@ -193,15 +198,24 @@ static int32_t tq_nm_to_iq(float nm) {
     return (int32_t)(can_wly_Nm_to_iA(nm) * 1024.0f);
 }
 
-/* ========== 0x100+ID 状态帧 (12 字节) ==========
- * D[0..2] POS[23:0] (float->定点, 按 PosMin/Max)
- * D[3..4] VEL[15:0] (float->定点, 按 SpdMin/Max)
- * D[5..6] T[15:0]   (float->定点, 按 TqMin/Max)
- * D[7..8] ERR1[15:0]
- * D[9]    ERR2
- * D[10]   WARN
- * D[11]   STA (Bit0=使能, Bit1=故障, Bit2=警告)
+/* ========== 0x100+ID 状态帧 (27 字节, FDCAN 自动 padding 到 32B) ==========
+ * D[0..2]   POS 反馈 [23:0] (float->定点, 按 PosMin/Max)
+ * D[3..4]   VEL 反馈 [15:0] (float->定点, 按 SpdMin/Max)
+ * D[5..6]   T   反馈 [15:0] (float->定点, 按 TqMin/Max, 来自 Iq 滤波 + Kt LUT)
+ * D[7..8]   ERR1[15:0]
+ * D[9]      ERR2
+ * D[10]     WARN
+ * D[11]     STA (Bit0=使能, Bit1=故障, Bit2=警告, Bit3=到达)
+ * D[12..14] POS 指令 [23:0] (position_ref → PosMin/Max 24bit)
+ * D[15..16] VEL 指令 [15:0] (velocity_ref → SpdMin/Max 16bit)
+ * D[17..18] T   指令 [15:0] (上位机最近一次 0x300/0x500 下发的 N·m, TqMin/Max 16bit)
+ * D[19..20] Iq  指令 [15:0] (I_q_ref 过 Kt LUT → N·m, TqMin/Max 16bit)
+ * D[21..22] Iq  反馈 [15:0] (s_iq_fb_filt_q10 过 Kt LUT → N·m, 同量化)
+ * D[23..24] Ia  反馈 [15:0] (I_a 过 Kt LUT → N·m, 同量化)
+ * D[25..26] MIT t_ff [15:0] (mit_t_ff[A] 过 Kt LUT → N·m, 同量化)
  */
+#define CAN_WLY_STATUS_FRAME_LEN 27
+
 static void pack_status_frame(uint8_t *d) {
     float pos_rad = pos_int_to_rad(controller_eyou.real_position_out);
     float vel_rad_s = vel_motor_to_load_rad_s(controller_eyou.dtheta_mech);
@@ -239,13 +253,55 @@ static void pack_status_frame(uint8_t *d) {
         controller_eyou.ServoState.Bit.SpeedArrivedFlag ||
         controller_eyou.ServoState.Bit.CurrentArrivedFlag) sta |= 0x08;  /* Bit3: 到达 */
     d[11] = sta;
+
+    /* ===== 扩展字段: 指令 + 反馈细分 ===== */
+    /* POS 指令: 输出端 1°/1024 → rad → 24bit */
+    float pos_ref_rad = pos_int_to_rad(controller_eyou.position_ref);
+    uint32_t p_ref_u = float_to_uint(pos_ref_rad, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
+    d[12] = p_ref_u & 0xFF;
+    d[13] = (p_ref_u >> 8) & 0xFF;
+    d[14] = (p_ref_u >> 16) & 0xFF;
+
+    /* VEL 指令: velocity_ref (电机端 rpm*1024*GR) → 输出端 rad/s → 16bit */
+    float vel_ref_rad_s = (float)controller_eyou.velocity_ref / (1024.0f * CAN_WLY_GR) * RPM_TO_RAD_S;
+    uint16_t v_ref_u = (uint16_t)float_to_uint(vel_ref_rad_s, g_can_wly_lim.spd_min, g_can_wly_lim.spd_max, 16);
+    d[15] = v_ref_u & 0xFF;
+    d[16] = (v_ref_u >> 8) & 0xFF;
+
+    /* T 指令: 上位机最近一次下发原始 N·m (无 LUT 反推, 量化误差最小) */
+    uint16_t t_cmd_u = (uint16_t)float_to_uint(s_last_torque_cmd_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
+    d[17] = t_cmd_u & 0xFF;
+    d[18] = (t_cmd_u >> 8) & 0xFF;
+
+    /* Iq 指令: I_q_ref (Q10) → A → N·m (Kt LUT) → 16bit */
+    float iq_ref_nm = tq_iq_to_nm(controller_eyou.I_q_ref);
+    uint16_t iq_ref_u = (uint16_t)float_to_uint(iq_ref_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
+    d[19] = iq_ref_u & 0xFF;
+    d[20] = (iq_ref_u >> 8) & 0xFF;
+
+    /* Iq 反馈: s_iq_fb_filt_q10 → N·m (与 D[5..6] 同源, 量化方便上位机交叉校验) */
+    uint16_t iq_fb_u = (uint16_t)float_to_uint(tq_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
+    d[21] = iq_fb_u & 0xFF;
+    d[22] = (iq_fb_u >> 8) & 0xFF;
+
+    /* Ia 相电流: I_a (Q10) → A → N·m (Kt LUT, 复用 Iq 同量纲, 仅作示意, 注意相电流和 Iq 物理意义不同) */
+    float ia_nm = tq_iq_to_nm(controller_eyou.I_a);
+    uint16_t ia_u = (uint16_t)float_to_uint(ia_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
+    d[23] = ia_u & 0xFF;
+    d[24] = (ia_u >> 8) & 0xFF;
+
+    /* MIT t_ff: mit_t_ff 是 float A (q轴电流), 走相同 LUT → N·m → 16bit */
+    float mit_tff_nm = can_wly_iA_to_Nm(controller_eyou.mit_t_ff);
+    uint16_t mit_tff_u = (uint16_t)float_to_uint(mit_tff_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
+    d[25] = mit_tff_u & 0xFF;
+    d[26] = (mit_tff_u >> 8) & 0xFF;
 }
 
 static void send_status_frame(void) {
-    uint8_t d[12];
+    uint8_t d[CAN_WLY_STATUS_FRAME_LEN];
     pack_status_frame(d);
-    can_dbg_push(CAN_WLY_ID_STATUS_BASE + s_node_id, d, 12, 1);
-    if (fdcan_send(CAN_WLY_ID_STATUS_BASE + s_node_id, d, 12) != HAL_OK) {
+    can_dbg_push(CAN_WLY_ID_STATUS_BASE + s_node_id, d, CAN_WLY_STATUS_FRAME_LEN, 1);
+    if (fdcan_send(CAN_WLY_ID_STATUS_BASE + s_node_id, d, CAN_WLY_STATUS_FRAME_LEN) != HAL_OK) {
         s_tx_fail_count++;
     }
 }
@@ -335,6 +391,7 @@ static void handle_torque_cmd(const uint8_t *data, uint32_t len) {
     if (iq >  max_cur) iq =  max_cur;
     else if (iq < -max_cur) iq = -max_cur;
     controller_eyou.I_q_ref = iq;
+    s_last_torque_cmd_nm = t_nm;
     controller_eyou.controller_mode = PROFILE_TORQUE_MODE;
     send_status_frame();
 }
@@ -381,7 +438,8 @@ static void handle_mit_cmd(const uint8_t *data, uint32_t len) {
 
     float p_des = uint_to_float(p_raw, g_can_wly_lim.pos_min, g_can_wly_lim.pos_max, 24);
     float v_des = uint_to_float(v_raw, g_can_wly_lim.spd_min, g_can_wly_lim.spd_max, 16);
-    float t_ff  = can_wly_Nm_to_iA(uint_to_float(t_raw, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16));
+    float t_nm  = uint_to_float(t_raw, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
+    float t_ff  = can_wly_Nm_to_iA(t_nm);
     float kp    = uint_to_float(kp_raw, g_can_wly_lim.kp_min, g_can_wly_lim.kp_max, 16);
     float kd    = uint_to_float(kd_raw, g_can_wly_lim.kd_min, g_can_wly_lim.kd_max, 16);
 
@@ -393,6 +451,7 @@ static void handle_mit_cmd(const uint8_t *data, uint32_t len) {
     controller_eyou.mit_kp    = kp;
     controller_eyou.mit_kd    = kd;
     controller_eyou.controller_mode = MIT_PD_MODE;
+    s_last_torque_cmd_nm = t_nm;
     s_mit_timeout_cnt = MIT_TIMEOUT_MS;
     if (primask == 0U) {
         __enable_irq();
