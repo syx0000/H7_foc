@@ -134,12 +134,15 @@ typedef struct { float i_A; float t_Nm; } kt_pt_t;
 
 static const kt_pt_t s_kt_lut[] = {
     {  0.0f,  0.00f},
-    {  5.5f,  11.7f},
-    { 11.0f,  24.2f},
-    { 16.5f,  36.2f},
-    { 22.0f,  47.7f},
-    { 32.0f,  70.7f},
-    { 43.0f,  91.7f},
+    {  5.0f,  9.7f},
+    { 10.0f,  21.7f},
+    { 15.0f,  33.6f},
+    { 20.0f,  45.2f},
+    { 25.0f,  56.7f},
+    { 30.0f,  67.8f},
+    { 35.0f,  78.6f},
+    { 40.0f,  88.9f},
+    { 45.0f,  98.8f},
     { 53.0f,  101.7f},
     { 58.0f,  110.0f},
     { 79.0f,  150.0f},
@@ -209,10 +212,10 @@ static int32_t tq_nm_to_iq(float nm) {
  * D[12..14] POS 指令 [23:0] (position_ref → PosMin/Max 24bit)
  * D[15..16] VEL 指令 [15:0] (velocity_ref → SpdMin/Max 16bit)
  * D[17..18] T   指令 [15:0] (上位机最近一次 0x300/0x500 下发的 N·m, TqMin/Max 16bit)
- * D[19..20] Iq  指令 [15:0] (I_q_ref 过 Kt LUT → N·m, TqMin/Max 16bit)
- * D[21..22] Iq  反馈 [15:0] (s_iq_fb_filt_q10 过 Kt LUT → N·m, 同量化)
- * D[23..24] Ia  反馈 [15:0] (I_a 过 Kt LUT → N·m, 同量化)
- * D[25..26] MIT t_ff [15:0] (mit_t_ff[A] 过 Kt LUT → N·m, 同量化)
+ * D[19..20] Iq  指令 [15:0] (int16, 0.01A, 量程 ±327.67A)
+ * D[21..22] Iq  反馈 [15:0] (int16, 0.01A, 来自 s_iq_fb_filt_q10)
+ * D[23..24] Ia  相电流 [15:0] (int16, 0.01A, 来自 controller.I_a)
+ * D[25..26] MIT t_ff [15:0] (mit_t_ff[A] 过 Kt LUT → N·m, TqMin/Max 16bit)
  */
 #define CAN_WLY_STATUS_FRAME_LEN 27
 
@@ -273,24 +276,23 @@ static void pack_status_frame(uint8_t *d) {
     d[17] = t_cmd_u & 0xFF;
     d[18] = (t_cmd_u >> 8) & 0xFF;
 
-    /* Iq 指令: I_q_ref (Q10) → A → N·m (Kt LUT) → 16bit */
-    float iq_ref_nm = tq_iq_to_nm(controller_eyou.I_q_ref);
-    uint16_t iq_ref_u = (uint16_t)float_to_uint(iq_ref_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
-    d[19] = iq_ref_u & 0xFF;
-    d[20] = (iq_ref_u >> 8) & 0xFF;
+    /* Iq 指令 / Iq 反馈 / Ia 相电流: Q10 → 0.01A int16 (量程 ±327.67A)
+     * Q10 * 100 / 1024 = 0.01A; 直接发电流值, 上位机要扭矩自行乘 Kt
+     * 避免 Kt LUT 在大电流段的非线性量化损失精度 */
+    int16_t iq_ref_001a = (int16_t)((controller_eyou.I_q_ref * 100) / 1024);
+    d[19] = (uint16_t)iq_ref_001a & 0xFF;
+    d[20] = ((uint16_t)iq_ref_001a >> 8) & 0xFF;
 
-    /* Iq 反馈: s_iq_fb_filt_q10 → N·m (与 D[5..6] 同源, 量化方便上位机交叉校验) */
-    uint16_t iq_fb_u = (uint16_t)float_to_uint(tq_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
-    d[21] = iq_fb_u & 0xFF;
-    d[22] = (iq_fb_u >> 8) & 0xFF;
+    int16_t iq_fb_001a = (int16_t)((s_iq_fb_filt_q10 * 100) / 1024);
+    d[21] = (uint16_t)iq_fb_001a & 0xFF;
+    d[22] = ((uint16_t)iq_fb_001a >> 8) & 0xFF;
 
-    /* Ia 相电流: I_a (Q10) → A → N·m (Kt LUT, 复用 Iq 同量纲, 仅作示意, 注意相电流和 Iq 物理意义不同) */
-    float ia_nm = tq_iq_to_nm(controller_eyou.I_a);
-    uint16_t ia_u = (uint16_t)float_to_uint(ia_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
-    d[23] = ia_u & 0xFF;
-    d[24] = (ia_u >> 8) & 0xFF;
+    int16_t ia_001a = (int16_t)((controller_eyou.I_a * 100) / 1024);
+    d[23] = (uint16_t)ia_001a & 0xFF;
+    d[24] = ((uint16_t)ia_001a >> 8) & 0xFF;
 
-    /* MIT t_ff: mit_t_ff 是 float A (q轴电流), 走相同 LUT → N·m → 16bit */
+    /* MIT t_ff: 是 float A (q轴电流前馈), 走 Kt LUT → N·m → 16bit
+     * 与 D[17..18] T 指令同量纲, 便于直接对比"上位机扭矩指令 vs MIT 解算前馈" */
     float mit_tff_nm = can_wly_iA_to_Nm(controller_eyou.mit_t_ff);
     uint16_t mit_tff_u = (uint16_t)float_to_uint(mit_tff_nm, g_can_wly_lim.tq_min, g_can_wly_lim.tq_max, 16);
     d[25] = mit_tff_u & 0xFF;
