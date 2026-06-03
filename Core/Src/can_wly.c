@@ -214,7 +214,7 @@ static int32_t tq_nm_to_iq(float nm) {
  * D[18..19] Tcmd 指令 [15:0] (上位机最近一次 0x300/0x500 下发的 N·m, TqMin/Max 16bit)
  * D[20..21] iqref [15:0] (uint16, = iqref_A * 100 + 10000, 量程 -100A~+555A)
  * D[22..23] iqfdb [15:0] (uint16, = iqfdb_A * 100 + 10000, 来自 s_iq_fb_filt_q10)
- * D[24..25] Irms  [15:0] (uint16, = Irms_A * 100 + 10000)
+ * D[24..25] Irms  [15:0] (uint16, = Irms_A * 100 + 10000, √((Id² + Iq²)/2) 真实 RMS)
  * D[26..27] MIT_T [15:0] (mit_t_ff[A] 过 Kt LUT → N·m, TqMin/Max 16bit)
  * D[28]     Vdc (uint8, 母线电压 V, 直接值)
  * D[29..30] Temp_D [15:0] (int16 LE, 驱动板温度 0.1°C)
@@ -299,10 +299,10 @@ static void pack_status_frame(uint8_t *d) {
     d[22] = iq_fb_u & 0xFF;
     d[23] = (iq_fb_u >> 8) & 0xFF;
 
-    /* Irms: 用 |Iq_filt| 近似 RMS (单相控制) */
-    int32_t iq_abs = s_iq_fb_filt_q10;
-    if (iq_abs < 0) iq_abs = -iq_abs;
-    float irms_A = (float)iq_abs / 1024.0f;
+    /* Irms: √((Id² + Iq²)/2) 真实 RMS */
+    float id_A = (float)controller_eyou.I_d / 1024.0f;
+    float iq_A = (float)s_iq_fb_filt_q10 / 1024.0f;
+    float irms_A = sqrtf((id_A * id_A + iq_A * iq_A) / 2.0f);
     uint16_t irms_u = (uint16_t)(irms_A * 100.0f + 10000.0f);
     d[24] = irms_u & 0xFF;
     d[25] = (irms_u >> 8) & 0xFF;
