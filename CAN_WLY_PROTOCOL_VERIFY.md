@@ -56,7 +56,7 @@ g_can_wly_lim = {
 |-----|--------|--------|----------|
 | `cantest1` | 0x200 D=`6D 8D 01` (v_raw=36205) | velocity_ref 单位换算 | ✅ -19.39 rad/s（量程 ±20）, mode=3 |
 | `cantest2` | 0x400 D=`00 00 80 00 80 01` | position_ref + Pid_PositionLimit | ✅ position_ref=0, mode=1 |
-| `cantest3` | 直接调 pack_status_frame | 状态帧 12 字节解码 | ✅ POS 解码正确 |
+| `cantest3` | 直接调 pack_status_frame | 状态帧 33 字节解码 | ✅ POS 解码正确 |
 | `cantest4` | 0x601 D=`40 00 20 00 ...` | SDO 读 0x2000 (pos_min) | ✅ 返回 -5.0f LE |
 | `cantest5` | 0x601 D=`23 00 20 00 <-10.0f LE>` | SDO 写 0x2000 | ✅ pos_min 改变 + 恢复 |
 | `cantest6` | 0x701 D=`FF×7 FA` | 控制帧使能 | ✅ foc_run: 0→1 |
@@ -80,8 +80,8 @@ g_can_wly_lim = {
 
 | 测项 | 发送帧 | 期望应答 | 状态 |
 |------|--------|----------|------|
-| T1 | `0x080` (任意 8B) | `0x101` 12B 状态帧 | ✅ |
-| T2 | `0x081` | `0x101` 12B | ✅ |
+| T1 | `0x080` (任意 8B) | `0x101` 33B 状态帧 | ✅ |
+| T2 | `0x081` | `0x101` 33B | ✅ |
 | T3 | `0x601` D=`40 00 20 00 00 00 00 00` | `0x581` 含 pos_min LE | ✅ |
 | T4 | `0x601` D=`23 00 20 00 00 00 20 C1` | `0x581` ACK (写 pos_min=-10.0f) | ✅ |
 | T5 | `0x601` D=`23 00 2F 00 02 00 00 00` | 改 node_id→2 | ✅ |

@@ -672,7 +672,7 @@ void dbg_cmd_set(void) {
             break;
         }
         case 3: {
-            /* 直接调 pack_status_frame 打印 12 字节 → 验证速度刻度疑点 */
+            /* 直接调 pack_status_frame 打印 33 字节 → 验证各字段编码 */
             printf("  Current state: pos_out=%d, dtheta_mech_out_eq=%d, I_q=%d\r\n",
                    (int)controller_eyou.real_position_out,
                    (int)(controller_eyou.dtheta_mech / 25),
