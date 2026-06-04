@@ -26,7 +26,7 @@
 | D[20..21] | iqref | uint16 LE | 0.01A + 偏置 10000 | Iq 指令，量程 -100A ~ +555A |
 | D[22..23] | iqfdb | uint16 LE | 0.01A + 偏置 10000 | Iq 反馈 (滤波后)，量程 -100A ~ +555A |
 | D[24..25] | Irms | uint16 LE | 0.01A + 偏置 10000 | 电流有效值 √((Id² + Iq²)/2) 真实 RMS |
-| D[26..27] | MIT_T | uint16 LE | 标幺化 (0~2¹⁶-1) | MIT t_ff 转矩前馈 (A→N·m via LUT) |
+| D[26..27] | MIT_T | uint16 LE | 标幺化 (0~2¹⁶-1) | 实际输出扭矩 (I_q_ref → N·m via LUT, 含 MIT 解算 / PI 输出) |
 | D[28] | Vdc | uint8 | V | 母线电压 (直接值，量程 0~255V) |
 | D[29..30] | Temp_D | int16 LE | 0.1°C | 驱动板温度 (有符号) |
 | D[31..32] | Temp_M | int16 LE | 0.1°C | 电机温度 (有符号) |

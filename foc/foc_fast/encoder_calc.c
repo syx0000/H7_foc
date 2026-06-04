@@ -196,8 +196,18 @@ void Encoder_out_data_Calculate(ControllerStruct* controller, uint16_t hz) {
         jump_cnt = 0;
     }
 
-    /* 速度不再独立计算，使用电机端 dtheta_mech / FOC_GEAR_RATIO 折算
-       负载端编码器低频抖动导致原速度信号波动大，且电机端折算精度足够 */
+    /* 速度：(real_position_out - pre) * hz / 6   (/6 = *60/360)
+       结果单位：输出端 rpm × 1024
+       采用 16 阶 MA 滤波器平滑负载端编码器噪声 */
+    int32_t dtheta_raw = (controller->real_position_out - controller->real_position_out_pre) * hz / 6;
+
+    if (controller->Speed_Filter_out.FilterRun != NULL &&
+        controller->Speed_Filter_out.buffer != NULL) {
+        controller->Speed_Filter_out.FilterRun(&controller->Speed_Filter_out, dtheta_raw);
+        controller->dtheta_mech_out = controller->Speed_Filter_out.filtered;
+    } else {
+        controller->dtheta_mech_out = dtheta_raw;
+    }
 
     controller->real_position_out_pre = controller->real_position_out;
     controller->old_angle_count_out = temp;

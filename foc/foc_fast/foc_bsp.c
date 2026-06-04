@@ -1154,12 +1154,12 @@ void dbg_log_print(void) {
         break;
     case 50:
         /* 列1=指令(rpm), 列2=斜坡后指令(rpm), 列3=电机端速度(rpm),
-           列4=电机端折算到载端(rpm, =列3/25), 列5=指令-反馈(rpm) */
+           列4=载端速度(0.1rpm, dtheta_mech_out*10/1024 16阶MA), 列5=指令-反馈(rpm) */
         printf("speed: %d, %d, %d, %d, %d\r\n",
                controller_eyou.velocity_ref / 1024,
                controller_eyou.velocity_ref_filterd / 1024,
                controller_eyou.dtheta_mech / 1024,
-               (controller_eyou.dtheta_mech / 1024) / 25,
+               (controller_eyou.dtheta_mech_out * 10) / 1024,
                (controller_eyou.velocity_ref - controller_eyou.dtheta_mech) / 1024);
         can_debug_send_log();  // CAN 双路输出
         break;

@@ -241,6 +241,10 @@ void Init_foc(ControllerStruct* controller) {
     controller->Speed_Filter.FilterInit(&controller->Speed_Filter, SPEED_FILTER_DEPTH);
     controller->Speed_Filter.FilterRun = moving_average_filter_s32;
 
+    controller->Speed_Filter_out.FilterInit = moving_average_create_s32;
+    controller->Speed_Filter_out.FilterInit(&controller->Speed_Filter_out, SPEED_FILTER_DEPTH);
+    controller->Speed_Filter_out.FilterRun = moving_average_filter_s32;
+
     InitCurrentShowFilter(controller);
     InitSpeedShowFilter(&controller->SpeedShowFilter);
     InitPositionShowFilter(controller);

@@ -430,7 +430,7 @@ struct log_50_t {
     int32_t v_ref_rpm;
     int32_t v_ref_filt_rpm;
     int32_t v_fb_motor_rpm;
-    int32_t v_fb_load_rpm;
+    int32_t v_fb_load_0p1rpm;   /* 载端速度 0.1 rpm/LSB */
     int32_t v_err_rpm;
 };  // 4 + 5*4 = 24B
 

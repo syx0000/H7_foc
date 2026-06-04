@@ -119,17 +119,17 @@ class TestPhase4Log(unittest.TestCase):
 
     def test_log_50_speed(self):
         # LOG_ID=50, seq=7, ts=0x1234, payload: 5×i32 LE
-        # v_ref=100, v_ref_filt=99, v_fb_motor=2500, v_fb_load=100, v_err=1
+        # v_ref=100rpm, v_ref_filt=99rpm, v_fb_motor=2500rpm, v_fb_load=1000(=100.0rpm 输出端 0.1rpm/LSB), v_err=1rpm
         import struct
         hdr = struct.pack('<BBH', 50, 7, 0x1234)
-        payload = struct.pack('<iiiii', 100, 99, 2500, 100, 1)
+        payload = struct.pack('<iiiii', 100, 99, 2500, 1000, 1)
         log = proto.parse_log(hdr + payload)
         self.assertEqual(log.log_id, 50)
         self.assertEqual(log.seq, 7)
         self.assertEqual(log.ts_ms, 0x1234)
         self.assertEqual(log.fields['v_ref_rpm'], 100)
         self.assertEqual(log.fields['v_fb_motor_rpm'], 2500)
-        self.assertEqual(log.fields['v_fb_load_rpm'], 100)
+        self.assertEqual(log.fields['v_fb_load_0p1rpm'], 1000)
 
     def test_log_40_current(self):
         import struct

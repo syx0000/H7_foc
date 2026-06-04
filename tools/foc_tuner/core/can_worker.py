@@ -587,7 +587,7 @@ class CanWorker(QThread):
                     f"{f['I_q_ref']}, {f['I_d_ref']}, {f['I_q_ref_filterd']}")
         if log.log_id == 50:
             return (f"speed: {f['v_ref_rpm']}, {f['v_ref_filt_rpm']}, "
-                    f"{f['v_fb_motor_rpm']}, {f['v_fb_load_rpm']}, {f['v_err_rpm']}")
+                    f"{f['v_fb_motor_rpm']}, {f['v_fb_load_0p1rpm']}, {f['v_err_rpm']}")
         if log.log_id == 60:
             return f"{f['CCR2']}, {f['CCR3']}, {f['CCR4']}"
         if log.log_id == 70:

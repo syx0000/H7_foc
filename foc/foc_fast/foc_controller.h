@@ -497,6 +497,7 @@ typedef struct {
   int32_t now_mechposition;                      // 当前机械位置
 
   int32_t dtheta_mech;                           // 转子机械角速度，单位1rpm/1024 (电机端)
+  int32_t dtheta_mech_out;                       // 载端编码器速度，单位1rpm/1024 (16阶MA滤波后)
   int32_t velocity_ref;                          // 速度参考值
   int32_t velocity_ref_filterd;                  // 滤波后的速度参考值
   /* feedforward term computed from position error (same units as velocity_ref) */
@@ -540,7 +541,8 @@ typedef struct {
   CurrentLoopSmooth CurrentSmooth;    // 电流环电流指令斜坡滤波结构体
   str_FILTER1 IqShowFilter;           // Iq显示数字滤波器
   /*速度环滤波器*/
-  movingAverage_s32t Speed_Filter;    // 速度计算滑动均值滤波器
+  movingAverage_s32t Speed_Filter;    // 速度计算滑动均值滤波器 (电机端)
+  movingAverage_s32t Speed_Filter_out;// 载端速度滑动均值滤波器 (16阶)
   SpeedLoopSmooth SpeedSmooth;        // 速度环斜坡滤波器
   str_FILTER1 SpeedShowFilter;        // 速度显示数字滤波器
   /*位置环滤波器*/

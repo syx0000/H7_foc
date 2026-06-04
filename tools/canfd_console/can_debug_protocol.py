@@ -240,7 +240,7 @@ _LOG_SCHEMAS = {
     10: ('<iHiii',  ['now_mech', 'theta_elec', 'pos_out', 'pos', 'dtheta_div1024']),
     30: ('<ii',     ['V_q', 'V_d']),
     40: ('<iiiiiii',['I_q', 'I_d', 'V_q', 'V_d', 'I_q_ref', 'I_d_ref', 'I_q_ref_filterd']),
-    50: ('<iiiii',  ['v_ref_rpm', 'v_ref_filt_rpm', 'v_fb_motor_rpm', 'v_fb_load_rpm', 'v_err_rpm']),
+    50: ('<iiiii',  ['v_ref_rpm', 'v_ref_filt_rpm', 'v_fb_motor_rpm', 'v_fb_load_0p1rpm', 'v_err_rpm']),
     60: ('<III',    ['CCR2', 'CCR3', 'CCR4']),
     70: ('<HHHiii', ['CCR2', 'CCR3', 'CCR4', 'I_a', 'I_b', 'I_c']),
     90: ('<iii',    ['Ia_raw', 'Ib_raw', 'Ic_raw']),

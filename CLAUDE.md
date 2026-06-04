@@ -358,7 +358,7 @@ FOC initialization done, NPP=8, foc_run=2         ← 闭环使能成功
 | 10 | now_mech, theta_elec, pos_out, pos, dtheta | 22B | 电角度 |
 | 30 | V_q, V_d | 12B | 电压 |
 | 40 | I_q, I_d, V_q, V_d, I_q_ref, I_d_ref, I_q_ref_filt | 32B | 电流 PI |
-| 50 | v_ref, v_ref_filt, v_fb_motor, v_fb_load, v_err | 24B | 速度 |
+| 50 | v_ref, v_ref_filt, v_fb_motor, v_fb_load_0p1rpm, v_err | 24B | 速度 (载端 0.1rpm/LSB) |
 | 60 | CCR2, CCR3, CCR4 | 16B | PWM 占空比 |
 | 70 | CCR2/3/4, I_a/b/c | 22B | CCR + 相电流 |
 | 90 | Ia_raw, Ib_raw, Ic_raw | 16B | 原始 ADC |

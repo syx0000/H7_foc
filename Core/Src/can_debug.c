@@ -618,7 +618,7 @@ void can_debug_send_log(void) {
         w_i32(&buf[4], controller_eyou.velocity_ref/1024);
         w_i32(&buf[8], controller_eyou.velocity_ref_filterd/1024);
         w_i32(&buf[12],controller_eyou.dtheta_mech/1024);
-        w_i32(&buf[16],(controller_eyou.dtheta_mech/1024)/25);
+        w_i32(&buf[16],(controller_eyou.dtheta_mech_out * 10) / 1024);  /* 载端 0.1 rpm/LSB 16阶MA */
         w_i32(&buf[20],(controller_eyou.velocity_ref-controller_eyou.dtheta_mech)/1024);
         fdcan_send(CAN_DBG_ID_LOG, buf, 24);
         break;

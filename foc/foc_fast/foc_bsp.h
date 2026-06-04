@@ -58,7 +58,7 @@ typedef int32_t  INT32;
 //   板 V2 (0.00125Ω): I_Q10 = (raw-offset) * 33 / 8    (量程加倍, 切板时改 DENOMINATOR=8)
 // 推导: I_Q10 = (raw-offset) * 3.3 * 1024 / 65535 / 10 / Rshunt
 #define CURRENT_TRANS_NUMERATOR 33
-#define CURRENT_TRANS_DENOMINATOR 16    /* V1 板, 切 V2 板改 8 */
+#define CURRENT_TRANS_DENOMINATOR 8    /* V1 板, 切 V2 板改 8 */
 
 //
 // 编码器分辨率常量 - DPT 双磁编码器 24位
