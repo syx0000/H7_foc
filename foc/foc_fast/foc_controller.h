@@ -34,11 +34,11 @@ extern volatile uint8_t USART_CONTROL;
 #define USE_COMMEND_RC_FILTER 0      //
 /*速度环指令滤波功能*/
 #define USE_SPEED_LOOP_SMOOTH 1    // 使用速度环斜坡滤波
-#define MIN_ACC_TIME 800            // 速度环斜坡时间 ms, 加速度=DEFAULT_MAX_SPEED/MIN_ACC_TIME ≈ 275rpm/s 输出端 (对齐梯形规划 230)
+#define MIN_ACC_TIME 10            // 速度环斜坡时间 ms, 加速度=DEFAULT_MAX_SPEED/MIN_ACC_TIME ≈ 275rpm/s 输出端 (对齐梯形规划 230)
 
 /*电流环指令滤波功能*/
 #define USE_CURRENT_LOOP_FILTER 1       // 使用电流环斜坡指令滤波0
-#define CURRENT_LOOP_MIN_ACC_TIME 10    // 电流环滤波时间ms
+#define CURRENT_LOOP_MIN_ACC_TIME 2    // 电流环滤波时间ms
 
 /*反电动势前馈 (BEMF Feed-Forward)
  *  Vd_ff = -ω_e × Lq × Iq

@@ -14,7 +14,7 @@
 /* 默认梯形规划: 100 output rpm 巡航 / 200 output rpm/s 加速.
  * VMAX 不超过 DEFAULT_MAX_SPEED=110rpm, 留 10% 余量给速度环跟踪。 */
 #define POS_TRAPEZOID_DEFAULT_VMAX_RPM   100.0f
-#define POS_TRAPEZOID_DEFAULT_AMAX_RPS   50.0f
+#define POS_TRAPEZOID_DEFAULT_AMAX_RPS   500.0f
 /* output rpm → LSB/tick 系数 (位置环 Ts = 1/2500 s) */
 #define POS_TRAPEZOID_VMAX_SCALE         (6.0f * 1024.0f / 2500.0f)              /* ≈ 2.4576 */
 #define POS_TRAPEZOID_AMAX_SCALE         (6.0f * 1024.0f / (2500.0f * 2500.0f))  /* ≈ 9.830e-4 */
@@ -208,16 +208,11 @@ int32_t PosSmoothRun(PositionRefSmooth* p, ControllerStruct* controller) {
     else                v_new = 0.0f;
   }
 
-  /* V_max 限幅: 接近目标时降速防过冲
-   * |D| < APPROACH_DIST: 用 V_APPROACH (远低于 v_max), 让动能小不容易过冲 */
-  #define POS_APPROACH_DIST   2048.0f   /* 剩余 <2°(2048 LSB) 进入逼近模式 */
-  #define POS_APPROACH_VMAX   (5.0f * POS_TRAPEZOID_VMAX_SCALE)   /* 5rpm 输出端 */
-  float v_lim = p->v_max;
-  if (fabsf(D) < POS_APPROACH_DIST && v_lim > POS_APPROACH_VMAX) {
-    v_lim = POS_APPROACH_VMAX;
-  }
-  if (v_new >  v_lim)  v_new =  v_lim;
-  if (v_new < -v_lim)  v_new = -v_lim;
+  /* V_max 限幅: 全程用统一 v_max，信任 brake_dist 精确离散公式的减速规划。
+   * 删除 APPROACH 段限速：末端强制降到 5rpm 慢爬单独耗 ~0.4s，且 bang-bang 已能算准停点，
+   * 叠加硬限速纯粹增加迟滞。 */
+  if (v_new >  p->v_max)  v_new =  p->v_max;
+  if (v_new < -p->v_max)  v_new = -p->v_max;
 
   p->cur_v   = v_new;
   p->cur_pos += v_new;
