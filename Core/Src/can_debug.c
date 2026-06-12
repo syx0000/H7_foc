@@ -414,6 +414,30 @@ static void h_canrxdbg(const uint8_t *d, uint32_t n) {
     send_resp(r,3);
 }
 
+/* 0x62: OVERLOAD_SET - 过载保护参数设置
+ * payload: [0x62, current_A_u8, warn_s_u8, stop_s_u8]
+ * 无参数(len==1): 查询当前值
+ * response: [0x62, OK, current_A, warn_s, stop_s] */
+static void h_overload_set(const uint8_t *d, uint32_t n) {
+    if (n >= 4) {
+        uint16_t a = d[1], w = d[2], s = d[3];
+        if (a > 0 && a <= 255 && w > 0 && w <= 60 && s > w && s <= 60) {
+            g_overload_current_A = a;
+            g_overload_warn_s    = w;
+            g_overload_stop_s    = s;
+            printf("CAN: Overload set %uA, warn=%us, stop=%us\r\n", a, w, s);
+        } else {
+            send_err(CAN_DBG_CMD_OVERLOAD_SET, CAN_DBG_ERR_OUT_OF_RANGE);
+            return;
+        }
+    }
+    uint8_t r[5] = {CAN_DBG_CMD_OVERLOAD_SET, CAN_DBG_OK,
+                    (uint8_t)g_overload_current_A,
+                    (uint8_t)g_overload_warn_s,
+                    (uint8_t)g_overload_stop_s};
+    send_resp(r, 5);
+}
+
 /* ===== CAN OTA 状态 ===== */
 static struct {
     uint8_t  active;        /* 1=接收中 */
@@ -564,6 +588,7 @@ static void dispatch(const uint8_t *d, uint32_t n) {
     case CAN_DBG_CMD_CALI:       h_cali(d,n); break;
     case CAN_DBG_CMD_BWTEST:     h_bwtest(d,n); break;
     case CAN_DBG_CMD_CANRXDBG:   h_canrxdbg(d,n); break;
+    case CAN_DBG_CMD_OVERLOAD_SET: h_overload_set(d,n); break;
     case CAN_DBG_CMD_OTA_BEGIN:  h_ota_begin(d,n); break;
     case CAN_DBG_CMD_OTA_END:    h_ota_end(d,n); break;
     case CAN_DBG_CMD_OTA_ABORT:  h_ota_abort(d,n); break;

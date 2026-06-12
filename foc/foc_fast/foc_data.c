@@ -315,6 +315,15 @@ uint8_t WriteRunDataToFlash(ControllerStruct* controller, unsigned int Address) 
                                    (uint16_t)g_theta_comp_pos;
     controller->FlashData.PhaseCompFlag = OFFEST_IS_CORRECTED_FLAG;
 
+    /* 写入前打包过载保护参数到 temp4 高 3 字节 (低字节保留 node_id) */
+    extern uint16_t g_overload_current_A;
+    extern uint16_t g_overload_warn_s;
+    extern uint16_t g_overload_stop_s;
+    controller->FlashData.temp4 = (controller->FlashData.temp4 & 0xFF) |
+                                  ((uint32_t)(uint8_t)g_overload_current_A << 8) |
+                                  ((uint32_t)(uint8_t)g_overload_warn_s   << 16) |
+                                  ((uint32_t)(uint8_t)g_overload_stop_s   << 24);
+
     /* CRC32 校验：算除 Crc 字段本身外的所有数据 (Crc 是结构体最后一个字段) */
     controller->FlashData.Crc = Flash_Crc32(
         &controller->FlashData,

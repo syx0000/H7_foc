@@ -47,6 +47,10 @@ static uint16_t pl_low_a_cnt = 0;   /* A 相低电流 */
 static uint16_t pl_low_b_cnt = 0;   /* B 相低电流 */
 static uint16_t pl_low_c_cnt = 0;   /* C 相低电流 */
 
+/* 过载保护计数器 (max = stop_s*1000, 受 <=60s 限制确保不溢出 uint16) */
+static uint16_t overload_cnt = 0;
+static uint8_t  overload_warned = 0;  /* 已触发过报警 (避免重复打印) */
+
 /* 清除所有故障检测计数器 */
 static void clear_all_fault_counters(void) {
     ovp_filter_cnt = 0;
@@ -61,6 +65,8 @@ static void clear_all_fault_counters(void) {
     pl_low_a_cnt = 0;
     pl_low_b_cnt = 0;
     pl_low_c_cnt = 0;
+    overload_cnt = 0;
+    overload_warned = 0;
 }
 
 /* PLACEHOLDER_FAULT_IMPL */
@@ -268,6 +274,53 @@ void busOverCurrentCheck(void) {
 }
 
 /*******************************************************************************
+ * overloadProFunc - 过载保护（可配置: 电流阈值/报警时间/停机时间）
+ * 1ms 慢环调用, 基于 |I_q| (Q10) 判断
+ * 默认: 95A / 5s 报警 / 10s 停机
+ * 支持串口 OverloadA<x>W<y>S<z> 和 CAN 0x62 命令修改, logid160 写 Flash
+ ******************************************************************************/
+/* 可配置参数 (全局, 供串口/CAN/Flash 访问) */
+uint16_t g_overload_current_A  = 95;    /* 过载电流阈值 (A) */
+uint16_t g_overload_warn_s     = 5;     /* 报警时间 (s) */
+uint16_t g_overload_stop_s     = 10;    /* 停机时间 (s) */
+
+uint8_t overloadProFunc(void) {
+    if (controller_eyou.foc_run < 1) {
+        overload_cnt = 0;
+        overload_warned = 0;
+        return 0;
+    }
+
+    int32_t iq_abs = controller_eyou.I_q;
+    if (iq_abs < 0) iq_abs = -iq_abs;
+
+    int32_t thresh_q10 = (int32_t)g_overload_current_A * 1024;
+    uint16_t warn_ms   = g_overload_warn_s * 1000;
+    uint16_t stop_ms   = g_overload_stop_s * 1000;
+
+    if (iq_abs > thresh_q10) {
+        overload_cnt++;
+        if (overload_cnt >= stop_ms) {
+            overload_cnt = stop_ms;
+            controller_eyou.ServoErrFlag.Bit.OverBusCurrentErr = 1;
+            printf("OVERLOAD STOP! |Iq|=%ld Q10 > %uA for %us\r\n",
+                   (long)iq_abs, g_overload_current_A, g_overload_stop_s);
+            return 1;
+        }
+        if (overload_cnt >= warn_ms && !overload_warned) {
+            overload_warned = 1;
+            printf("OVERLOAD WARN! |Iq|=%ld Q10 > %uA for %us\r\n",
+                   (long)iq_abs, g_overload_current_A, g_overload_warn_s);
+        }
+    } else {
+        if (overload_cnt > 0) overload_cnt--;
+        if (overload_cnt < warn_ms) overload_warned = 0;
+    }
+
+    return 0;
+}
+
+/*******************************************************************************
  * LockedRotorProFunc - 堵转保护（电流大 + 速度小 = 堵转）
  * 开环和闭环运行时都检测（foc_run >= 1）
  ******************************************************************************/
@@ -366,8 +419,8 @@ uint8_t phaseLossProFunc(void) {
                        :  controller_eyou.I_q_ref_filterd;
 
     uint8_t fault_triggered = 0;
-    /* EMA 已平滑, 滤波时间从 100ms 减到 50ms (响应更快) */
-    const uint16_t filter_ms = 50;
+    /* 滤波时间从 Threshold 结构体读取 (默认 200ms, 大扭矩瞬态不平衡需要更长消抖) */
+    const uint16_t filter_ms = Threshold.PhaseLossFilterMs;
 
     /* 仅在电机有负载运行时启用 */
     if (iq_cmd_abs > (int32_t)Threshold.PhaseLossActiveIq) {

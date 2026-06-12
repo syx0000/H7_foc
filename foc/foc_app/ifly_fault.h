@@ -98,6 +98,12 @@ void busOverCurrentCheck(void);    //
 void motorCurrentOffsetCheck(void);
 void motorOverPosCheck(void);
 uint8_t phaseLossProFunc(void);    /* 缺相保护 (1ms 慢环, KCL + 单相低 RMS 双判据) */
+uint8_t overloadProFunc(void);     /* 过载保护 (可配置阈值/报警/停机时间) */
+
+/* 过载保护可配置参数 (串口/CAN/Flash 可修改) */
+extern uint16_t g_overload_current_A;   /* 电流阈值 A */
+extern uint16_t g_overload_warn_s;      /* 报警时间 s */
+extern uint16_t g_overload_stop_s;      /* 停机时间 s */
 uint8_t driverChipFaultCheck(void);
 int16_t getBoardTemp(void);
 int16_t getMotorTemp(void);

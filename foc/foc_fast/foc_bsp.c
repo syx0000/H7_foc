@@ -503,6 +503,30 @@ void dbg_cmd_set(void) {
         printf("CAN RX debug: %s\r\n", g_can_rx_debug ? "ON" : "OFF");
     }
 
+    /* OverloadA<x>W<y>S<z>: 过载保护参数设置
+       x=电流阈值(A), y=报警时间(s), z=停机时间(s)
+       示例: OverloadA95W5S10  → 95A, 5s报警, 10s停机
+       单独查询: Overload (不带参数) → 打印当前值 */
+    if (NULL != strstr((char *)dbgRecvBuf, "Overload")) {
+        loc = strstr((char *)dbgRecvBuf, "A");
+        if (loc != NULL && loc > strstr((char *)dbgRecvBuf, "Overload")) {
+            uint16_t a_val = (uint16_t)atoi(loc + 1);
+            char *wloc = strstr(loc, "W");
+            char *sloc = wloc ? strstr(wloc, "S") : NULL;
+            if (wloc && sloc && a_val > 0 && a_val <= 255) {
+                uint16_t w_val = (uint16_t)atoi(wloc + 1);
+                uint16_t s_val = (uint16_t)atoi(sloc + 1);
+                if (w_val > 0 && w_val <= 60 && s_val > w_val && s_val <= 60) {
+                    g_overload_current_A = a_val;
+                    g_overload_warn_s    = w_val;
+                    g_overload_stop_s    = s_val;
+                }
+            }
+        }
+        printf("Overload: %uA, warn=%us, stop=%us\r\n",
+               g_overload_current_A, g_overload_warn_s, g_overload_stop_s);
+    }
+
     /* offsetpos<N>: 设置正转固定角度偏置 (单位 ×0.1°, 例 400=40°)
        注: 用 atoi(loc+len) 而不是 strtok, 避免破坏 buffer 影响后续命令解析
        (上位机一次发 4 行 phase comp 命令时, strtok 会把后续命令首字母改成 \0) */

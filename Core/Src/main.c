@@ -302,6 +302,8 @@ int main(void)
 			boradTempProFunc();          // 板温过温
 			motorTempProFunc();          // 电机绕组过温
 			//phaseLossProFunc();          // 缺相保护 (KCL + 单相低电流双判据)
+			overloadProFunc();             // 过载保护 (95A 5s报警 10s停机)
+
 			// busOverCurrentCheck();       // 母线过流
 			// LockedRotorProFunc();        // 堵转检测
 			//driverChipFaultCheck();      // DRV8353 nFAULT 引脚

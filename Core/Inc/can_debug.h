@@ -50,6 +50,7 @@ typedef enum {
 #define CAN_DBG_CMD_CALI            0x5F
 #define CAN_DBG_CMD_BWTEST          0x60
 #define CAN_DBG_CMD_CANRXDBG        0x61
+#define CAN_DBG_CMD_OVERLOAD_SET    0x62
 #define CAN_DBG_CMD_OTA_BEGIN       0x70
 #define CAN_DBG_CMD_OTA_END         0x71
 #define CAN_DBG_CMD_OTA_ABORT       0x72

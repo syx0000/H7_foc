@@ -41,9 +41,9 @@ Portection_Value Threshold = {
     .UVWCurrentLimit   = 46080,    // 45A Q10 (速度环限幅35A + 动态裕量)
     /* 缺相保护阈值 */
     .PhaseLossKclThresh = 1024,    /* 1A Q10, 三相和容差 */
-    .PhaseLossLowThresh = 307,     /* 0.3A Q10, 单相低电流判据 */
+    .PhaseLossLowThresh = 102,     /* 0.1A Q10, 单相低电流判据 (原0.3A大扭矩不平衡误触发) */
     .PhaseLossActiveIq  = 2048,    /* 2A Q10, 启用单相低判据的最低 |Iq| */
-    .PhaseLossFilterMs  = 100,     /* 100ms 消抖 */
+    .PhaseLossFilterMs  = 200,     /* 200ms 消抖 (原100ms瞬态不平衡误触发) */
 };
 int8_t brake_control_flag;
 

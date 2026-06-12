@@ -819,6 +819,16 @@ void can_wly_init(void) {
         s_node_id = CAN_WLY_ID_DEFAULT;
     }
 
+    /* 从 Flash 恢复过载保护参数 (temp4 高 3 字节) */
+    uint8_t ol_a = (uint8_t)((controller_eyou.FlashData.temp4 >> 8)  & 0xFF);
+    uint8_t ol_w = (uint8_t)((controller_eyou.FlashData.temp4 >> 16) & 0xFF);
+    uint8_t ol_s = (uint8_t)((controller_eyou.FlashData.temp4 >> 24) & 0xFF);
+    if (ol_a > 0 && ol_w > 0 && ol_s > ol_w) {
+        g_overload_current_A = ol_a;
+        g_overload_warn_s    = ol_w;
+        g_overload_stop_s    = ol_s;
+    }
+
     /* 上电同步: 协议位置量程 → Flash 软限位, 让 motorOverPosCheck 用同一套范围 */
     const float rad_to_lsb = 180.0f * 1024.0f / (float)M_PI;
     controller_eyou.FlashData.MinPositionLimit = (int32_t)(g_can_wly_lim.pos_min * rad_to_lsb);
