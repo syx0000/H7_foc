@@ -372,3 +372,221 @@ cleanup:
   printf("};\r\n");
   printf("================================================\r\n");
 }
+
+/*******************************************************************************
+ * bwtest11: 相位补偿自动辨识
+ * 原理: BEMF FF 开启时, 稳态 V_d_pi = ωe × ψf × ε (角度误差)
+ * 两速度点测量 → 线性回归得 offset 和 comp (正/反方向各一次)
+ ******************************************************************************/
+void TestAutoPhaseComp(void)
+{
+  /* 前置检查: 需要 ψf 和 BEMF FF */
+  if (controller_eyou.FlashData.FluxIdentFlag != OFFEST_IS_CORRECTED_FLAG) {
+    printf("PhaseComp ident FAILED: psi_f not identified, run bwtest4 first\r\n");
+    return;
+  }
+  float psi_f = controller_eyou.ident_test.flux_psi;
+  if (psi_f < 1e-6f) {
+    printf("PhaseComp ident FAILED: psi_f=0\r\n");
+    return;
+  }
+
+  printf("=== Phase Comp Auto-Ident (bwtest11) ===\r\n");
+
+  /* 保存当前参数 */
+  extern int16_t g_theta_offset_pos, g_theta_offset_neg;
+  extern int16_t g_theta_comp_pos, g_theta_comp_neg;
+  int16_t saved_off_pos  = g_theta_offset_pos;
+  int16_t saved_off_neg  = g_theta_offset_neg;
+  int16_t saved_comp_pos = g_theta_comp_pos;
+  int16_t saved_comp_neg = g_theta_comp_neg;
+  uint8_t saved_mode = controller_eyou.controller_mode;
+  uint8_t saved_run  = controller_eyou.foc_run;
+  uint8_t saved_velocity_coe = Threshold.velocity_coe;
+  uint16_t saved_phase_loss_iq = Threshold.PhaseLossActiveIq;
+
+  /* 临时放宽保护 (速度阶跃瞬态不触发偏差/缺相保护) */
+  Threshold.velocity_coe = 100;
+  Threshold.PhaseLossActiveIq = 65535;
+
+  /* 清零相位补偿 (让误差全部暴露到 V_d_pi) */
+  g_theta_offset_pos = 0; g_theta_offset_neg = 0;
+  g_theta_comp_pos = 0;   g_theta_comp_neg = 0;
+
+  /* 切速度模式 */
+  controller_eyou.controller_mode = CYCLIC_SYNC_VELOCITY_MODE;
+  controller_eyou.foc_run = 1;
+
+  /* 测量参数 */
+  const int32_t speed_lo = 750;   /* rpm 电机端 */
+  const int32_t speed_hi = 2000;  /* rpm 电机端 */
+  const uint32_t settle_ms = 1500;
+  const uint32_t sample_ms = 1000;
+
+  float we_lo = speed_lo * 2.0f * 3.14159265f / 60.0f * NPP;
+  float we_hi = speed_hi * 2.0f * 3.14159265f / 60.0f * NPP;
+  /* dtheta_per_sample (theta_elec counts / sample @10kHz) */
+  float dt_lo = we_lo / 10000.0f * 65536.0f / (2.0f * 3.14159265f);
+  float dt_hi = we_hi / 10000.0f * 65536.0f / (2.0f * 3.14159265f);
+
+  int16_t new_off_pos = 0, new_off_neg = 0;
+  int16_t new_comp_pos = 0, new_comp_neg = 0;
+  uint8_t success = 0;
+
+  /* velocity_ref 单位 = rpm × 1024 电机端 */
+  int32_t vel_lo_pos = speed_lo * 1024;
+  int32_t vel_hi_pos = speed_hi * 1024;
+
+  /* ===== 正转 ===== */
+  printf("Pos direction: ramping to %ld rpm...\r\n", (long)speed_lo);
+  controller_eyou.velocity_ref = vel_lo_pos;
+  for (uint32_t i = 0; i < settle_ms; i++) {
+    if (controller_eyou.ServoErrFlag.All_Flag) goto fault;
+    HAL_Delay(1);
+  }
+
+  int64_t sum_vd;
+  float vd_avg_lo, vd_avg_hi;
+
+  /* 低速采集 */
+  sum_vd = 0;
+  for (uint32_t i = 0; i < sample_ms; i++) {
+    HAL_Delay(1);
+    sum_vd += controller_eyou.IncPID_DAxis.OutPut;
+    if (controller_eyou.ServoErrFlag.All_Flag) goto fault;
+  }
+  vd_avg_lo = (float)sum_vd / (float)sample_ms;
+  printf("  lo: Vd_pi_avg = %.1f (Q10)\r\n", vd_avg_lo);
+
+  /* 高速采集 */
+  printf("  ramping to %ld rpm...\r\n", (long)speed_hi);
+  controller_eyou.velocity_ref = vel_hi_pos;
+  for (uint32_t i = 0; i < settle_ms; i++) {
+    if (controller_eyou.ServoErrFlag.All_Flag) goto fault;
+    HAL_Delay(1);
+  }
+  sum_vd = 0;
+  for (uint32_t i = 0; i < sample_ms; i++) {
+    HAL_Delay(1);
+    sum_vd += controller_eyou.IncPID_DAxis.OutPut;
+    if (controller_eyou.ServoErrFlag.All_Flag) goto fault;
+  }
+  vd_avg_hi = (float)sum_vd / (float)sample_ms;
+  printf("  hi: Vd_pi_avg = %.1f (Q10)\r\n", vd_avg_hi);
+
+  /* 计算正转参数 */
+  {
+    float eps_lo = (vd_avg_lo / 1024.0f) / (we_lo * psi_f);  /* rad */
+    float eps_hi = (vd_avg_hi / 1024.0f) / (we_hi * psi_f);
+    float eps_lo_cnt = eps_lo * 65536.0f / (2.0f * 3.14159265f);
+    float eps_hi_cnt = eps_hi * 65536.0f / (2.0f * 3.14159265f);
+    float comp_f = (eps_hi_cnt - eps_lo_cnt) * 10.0f / (dt_hi - dt_lo);
+    float off_cnt = eps_lo_cnt - dt_lo * comp_f / 10.0f;
+    float off_01deg = off_cnt * 100.0f / 1820.0f;
+    new_off_pos  = (int16_t)(off_01deg >= 0 ? off_01deg + 0.5f : off_01deg - 0.5f);
+    new_comp_pos = (int16_t)(comp_f >= 0 ? comp_f + 0.5f : comp_f - 0.5f);
+    printf("  Pos result: offset=%d (0.1deg), comp=%d\r\n", new_off_pos, new_comp_pos);
+  }
+
+  /* ===== 减速停车 ===== */
+  controller_eyou.velocity_ref = 0;
+  HAL_Delay(1000);
+  if (controller_eyou.ServoErrFlag.All_Flag) goto fault;
+
+  /* ===== 反转 ===== */
+  printf("Neg direction: ramping to -%ld rpm...\r\n", (long)speed_lo);
+  controller_eyou.velocity_ref = -vel_lo_pos;
+  for (uint32_t i = 0; i < settle_ms; i++) {
+    if (controller_eyou.ServoErrFlag.All_Flag) goto fault;
+    HAL_Delay(1);
+  }
+
+  /* 低速采集 */
+  sum_vd = 0;
+  for (uint32_t i = 0; i < sample_ms; i++) {
+    HAL_Delay(1);
+    sum_vd += controller_eyou.IncPID_DAxis.OutPut;
+    if (controller_eyou.ServoErrFlag.All_Flag) goto fault;
+  }
+  vd_avg_lo = (float)sum_vd / (float)sample_ms;
+  printf("  lo: Vd_pi_avg = %.1f (Q10)\r\n", vd_avg_lo);
+
+  /* 高速采集 */
+  printf("  ramping to -%ld rpm...\r\n", (long)speed_hi);
+  controller_eyou.velocity_ref = -vel_hi_pos;
+  for (uint32_t i = 0; i < settle_ms; i++) {
+    if (controller_eyou.ServoErrFlag.All_Flag) goto fault;
+    HAL_Delay(1);
+  }
+  sum_vd = 0;
+  for (uint32_t i = 0; i < sample_ms; i++) {
+    HAL_Delay(1);
+    sum_vd += controller_eyou.IncPID_DAxis.OutPut;
+    if (controller_eyou.ServoErrFlag.All_Flag) goto fault;
+  }
+  vd_avg_hi = (float)sum_vd / (float)sample_ms;
+  printf("  hi: Vd_pi_avg = %.1f (Q10)\r\n", vd_avg_hi);
+
+  /* 计算反转参数 (反转时 V_d_pi 符号翻转, ε 仍取正值代表补偿量) */
+  {
+    float eps_lo = -(vd_avg_lo / 1024.0f) / (we_lo * psi_f);  /* 反转取负 */
+    float eps_hi = -(vd_avg_hi / 1024.0f) / (we_hi * psi_f);
+    float eps_lo_cnt = eps_lo * 65536.0f / (2.0f * 3.14159265f);
+    float eps_hi_cnt = eps_hi * 65536.0f / (2.0f * 3.14159265f);
+    float comp_f = (eps_hi_cnt - eps_lo_cnt) * 10.0f / (dt_hi - dt_lo);
+    float off_cnt = eps_lo_cnt - dt_lo * comp_f / 10.0f;
+    float off_01deg = off_cnt * 100.0f / 1820.0f;
+    new_off_neg  = (int16_t)(off_01deg >= 0 ? off_01deg + 0.5f : off_01deg - 0.5f);
+    new_comp_neg = (int16_t)(comp_f >= 0 ? comp_f + 0.5f : comp_f - 0.5f);
+    printf("  Neg result: offset=%d (0.1deg), comp=%d\r\n", new_off_neg, new_comp_neg);
+  }
+
+  /* 结果合理性校验 */
+  #define PHCOMP_OFF_MAX  400   /* ±40° */
+  #define PHCOMP_COMP_MAX 100   /* comp 合理范围 0~100 (≈0~10 个采样延迟) */
+  if (abs(new_off_pos) > PHCOMP_OFF_MAX || abs(new_off_neg) > PHCOMP_OFF_MAX ||
+      new_comp_pos < -PHCOMP_COMP_MAX || new_comp_pos > PHCOMP_COMP_MAX ||
+      new_comp_neg < -PHCOMP_COMP_MAX || new_comp_neg > PHCOMP_COMP_MAX) {
+    printf("PhaseComp ident FAILED: result out of range!\r\n");
+    printf("  off_pos=%d off_neg=%d comp_pos=%d comp_neg=%d\r\n",
+           new_off_pos, new_off_neg, new_comp_pos, new_comp_neg);
+    printf("  Valid: |offset|<=%d, comp in [-10,%d]\r\n", PHCOMP_OFF_MAX, PHCOMP_COMP_MAX);
+    goto cleanup;
+  }
+
+  success = 1;
+  goto cleanup;
+
+fault:
+  printf("PhaseComp ident FAULT: ServoErrFlag=0x%04X\r\n",
+         (unsigned)controller_eyou.ServoErrFlag.All_Flag);
+
+cleanup:
+  controller_eyou.velocity_ref = 0;
+  HAL_Delay(500);
+  controller_eyou.controller_mode = saved_mode;
+  controller_eyou.foc_run = saved_run;
+  Threshold.velocity_coe = saved_velocity_coe;
+  Threshold.PhaseLossActiveIq = saved_phase_loss_iq;
+
+  if (success) {
+    g_theta_offset_pos = new_off_pos;
+    g_theta_offset_neg = new_off_neg;
+    g_theta_comp_pos   = new_comp_pos;
+    g_theta_comp_neg   = new_comp_neg;
+    SavePhaseCompToFlash();
+    printf("\r\n=== Phase Comp Auto-Ident SUCCESS ===\r\n");
+    printf("  Pos: offset=%d (0.1deg=%.1fdeg), comp=%d\r\n",
+           new_off_pos, new_off_pos * 0.1f, new_comp_pos);
+    printf("  Neg: offset=%d (0.1deg=%.1fdeg), comp=%d\r\n",
+           new_off_neg, new_off_neg * 0.1f, new_comp_neg);
+    printf("  (Saved to Flash)\r\n");
+  } else {
+    /* 辨识失败,恢复原参数 */
+    g_theta_offset_pos = saved_off_pos;
+    g_theta_offset_neg = saved_off_neg;
+    g_theta_comp_pos   = saved_comp_pos;
+    g_theta_comp_neg   = saved_comp_neg;
+    printf("Phase comp restored to previous values\r\n");
+  }
+}

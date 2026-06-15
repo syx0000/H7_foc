@@ -33,5 +33,6 @@ void TestAutoTuneSpeed(void);
 void TestAutoTuneCurrent(void);
 void TestAutoTunePosition(void);
 void TestDeadtimeCalibration(void);
+void TestAutoPhaseComp(void);
 
 #endif

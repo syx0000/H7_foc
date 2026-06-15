@@ -223,6 +223,8 @@ void dbg_cmd_set(void) {
             TestPositionLoopBandwidth();
         } else if (which == 10) {
             TestDeadtimeCalibration();
+        } else if (which == 11) {
+            TestAutoPhaseComp();
         }
     }
 

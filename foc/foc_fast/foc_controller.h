@@ -15,7 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 /*******************************版本信息*************************************************/
-#define SOFT_VERSION "20260603.1"
+#define SOFT_VERSION "20260613.1"
 #define HARD_VERSION "20260528"
 #define BUILD_DATE   __DATE__
 #define BUILD_TIME   __TIME__
