@@ -21,6 +21,10 @@
 #include "flash_port.h"
 #include "fdcan.h"
 #include "can_wly.h"
+#include "can_protocol_sel.h"
+#if (CAN_PROTOCOL_SEL == CAN_PROTO_CYBEAST)
+#include "can_cybeast.h"
+#endif
 #include "can_debug.h"
 #include "stm32h7xx_hal.h"
 #include "ota_app.h"
@@ -947,6 +951,133 @@ void dbg_cmd_set(void) {
                    controller_eyou.mit_kp, controller_eyou.mit_kd);
             break;
         }
+#if (CAN_PROTOCOL_SEL == CAN_PROTO_CYBEAST)
+        /* ============ cantest20~27: 守护兽 CAN Simple 协议验证 ============ */
+        case 20: {
+            /* MIT 解包正确性: 中点帧 (全字段 50% 量程) */
+            /* pos=0 (mid=0x8000), vel=0 (mid=0x800), kp=250 (mid=0x800), kd=2.5 (mid=0x800), tq=0 (mid=0x800) */
+            uint8_t d[] = {0x80, 0x00, 0x80, 0x08, 0x00, 0x80, 0x08, 0x00};
+            uint32_t id = (can_cybeast_get_node_id() << 5) | 0x08;
+            printf("  [RX] ID=0x%03X MIT midpoint (all 50%%)\r\n", (unsigned int)id);
+            fdcan_rx_user(id, d, 8);
+            printf("  mit_p_des=%.4f (expect 0.0 rad)\r\n", controller_eyou.mit_p_des);
+            printf("  mit_v_des=%.4f (expect 0.0 rad/s)\r\n", controller_eyou.mit_v_des);
+            printf("  mit_kp=%.2f (expect 250.0)\r\n", controller_eyou.mit_kp);
+            printf("  mit_kd=%.4f (expect 2.5)\r\n", controller_eyou.mit_kd);
+            printf("  mit_t_ff=%.4f A (expect ~0 from 0Nm)\r\n", controller_eyou.mit_t_ff);
+            printf("  mode=%d (expect %d=MIT_PD)\r\n", controller_eyou.controller_mode, MIT_PD_MODE);
+            break;
+        }
+        case 21: {
+            /* MIT 解包: 全零帧 (最小值边界) */
+            uint8_t d[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+            uint32_t id = (can_cybeast_get_node_id() << 5) | 0x08;
+            printf("  [RX] ID=0x%03X MIT all-zero (min boundary)\r\n", (unsigned int)id);
+            fdcan_rx_user(id, d, 8);
+            printf("  mit_p_des=%.4f (expect -12.5 rad)\r\n", controller_eyou.mit_p_des);
+            printf("  mit_v_des=%.4f (expect -65.0 rad/s)\r\n", controller_eyou.mit_v_des);
+            printf("  mit_kp=%.2f (expect 0.0)\r\n", controller_eyou.mit_kp);
+            printf("  mit_kd=%.4f (expect 0.0)\r\n", controller_eyou.mit_kd);
+            printf("  mit_t_ff=%.4f A (expect from -50Nm)\r\n", controller_eyou.mit_t_ff);
+            break;
+        }
+        case 22: {
+            /* MIT 解包: 全 0xFF 帧 (最大值边界) */
+            uint8_t d[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+            uint32_t id = (can_cybeast_get_node_id() << 5) | 0x08;
+            printf("  [RX] ID=0x%03X MIT all-FF (max boundary)\r\n", (unsigned int)id);
+            fdcan_rx_user(id, d, 8);
+            printf("  mit_p_des=%.4f (expect +12.5 rad)\r\n", controller_eyou.mit_p_des);
+            printf("  mit_v_des=%.4f (expect +65.0 rad/s)\r\n", controller_eyou.mit_v_des);
+            printf("  mit_kp=%.2f (expect 500.0)\r\n", controller_eyou.mit_kp);
+            printf("  mit_kd=%.4f (expect 5.0)\r\n", controller_eyou.mit_kd);
+            printf("  mit_t_ff=%.4f A (expect from +50Nm)\r\n", controller_eyou.mit_t_ff);
+            break;
+        }
+        case 23: {
+            /* Heartbeat 字段验证 */
+            controller_eyou.foc_run = 2;
+            controller_eyou.ServoErrFlag.All_Flag = 0;
+            printf("  State: foc_run=2, err=0 → expect Heartbeat: state=8, err=0\r\n");
+            /* 强制发一包心跳 (stub 打印) */
+            uint32_t id = (can_cybeast_get_node_id() << 5) | 0x01;
+            printf("  Expected TX ID=0x%03X: byte4=0x08, byte0-3=0x00\r\n", (unsigned int)id);
+            /* 手动触发 (hack: 直接 reset hb_tick 不暴露, 用 tick 函数) */
+            for (int i = 0; i < 500; i++) can_cybeast_tick_1ms();
+            printf("  (Heartbeat should have printed above)\r\n");
+            break;
+        }
+        case 24: {
+            /* 单位换算验证: rev ↔ 内部 */
+            /* Set_Input_Pos(1.0 rev) → position_ref = 1*360*1024 = 368640 */
+            union { float f; uint8_t b[4]; } cv;
+            cv.f = 1.0f;
+            uint8_t d[8] = {cv.b[0], cv.b[1], cv.b[2], cv.b[3], 0,0,0,0};
+            uint32_t id = (can_cybeast_get_node_id() << 5) | 0x0C;
+            printf("  [RX] Set_Input_Pos(1.0 rev)\r\n");
+            fdcan_rx_user(id, d, 8);
+            printf("  position_ref=%d (expect 368640 = 1*360*1024)\r\n",
+                   (int)controller_eyou.position_ref);
+            /* Set_Input_Vel(1.0 rev/s) → velocity_ref = 1*60*1024*25 = 1536000 */
+            cv.f = 1.0f;
+            d[0]=cv.b[0]; d[1]=cv.b[1]; d[2]=cv.b[2]; d[3]=cv.b[3];
+            id = (can_cybeast_get_node_id() << 5) | 0x0D;
+            printf("  [RX] Set_Input_Vel(1.0 rev/s)\r\n");
+            fdcan_rx_user(id, d, 8);
+            printf("  velocity_ref=%d (expect 1536000 = 1*60*1024*25)\r\n",
+                   (int)controller_eyou.velocity_ref);
+            break;
+        }
+        case 25: {
+            /* 状态机切换: IDLE → CLOSED_LOOP → IDLE */
+            uint8_t d[8] = {0};
+            uint32_t id = (can_cybeast_get_node_id() << 5) | 0x07;
+            /* CLOSED_LOOP */
+            d[0] = 8; d[1]=0; d[2]=0; d[3]=0;
+            printf("  [RX] Set_Axis_State(8=CLOSED_LOOP)\r\n");
+            fdcan_rx_user(id, d, 8);
+            printf("  foc_run=%d (expect 2)\r\n", controller_eyou.foc_run);
+            /* IDLE */
+            d[0] = 1;
+            printf("  [RX] Set_Axis_State(1=IDLE)\r\n");
+            fdcan_rx_user(id, d, 8);
+            printf("  foc_run=%d (expect 0)\r\n", controller_eyou.foc_run);
+            printf("  I_q_ref=%d (expect 0)\r\n", (int)controller_eyou.I_q_ref);
+            break;
+        }
+        case 26: {
+            /* MIT 超时保护: 发一帧 → 等 25ms → 验证退出 */
+            uint8_t d[] = {0x80, 0x00, 0x80, 0x08, 0x00, 0x80, 0x08, 0x00};
+            uint32_t id = (can_cybeast_get_node_id() << 5) | 0x08;
+            controller_eyou.foc_run = 2;
+            printf("  [RX] MIT frame → start MIT mode\r\n");
+            fdcan_rx_user(id, d, 8);
+            printf("  mode=%d (expect %d=MIT_PD)\r\n", controller_eyou.controller_mode, MIT_PD_MODE);
+            /* 模拟 25ms 超时 */
+            printf("  Simulating 25ms timeout...\r\n");
+            for (int i = 0; i < 25; i++) can_cybeast_tick_1ms();
+            printf("  mode=%d (expect %d=PROFILE_TORQUE)\r\n",
+                   controller_eyou.controller_mode, PROFILE_TORQUE_MODE);
+            printf("  I_q_ref=%d (expect 0)\r\n", (int)controller_eyou.I_q_ref);
+            printf("  CommunicateErr=%d (expect 1)\r\n",
+                   controller_eyou.ServoErrFlag.Bit.CommunicateErr);
+            controller_eyou.ServoErrFlag.All_Flag = 0;
+            break;
+        }
+        case 27: {
+            /* 非本节点 ID 忽略验证 */
+            uint8_t d[] = {0x80, 0x00, 0x80, 0x08, 0x00, 0x80, 0x08, 0x00};
+            uint8_t my_id = can_cybeast_get_node_id();
+            uint8_t wrong_id = (my_id == 1) ? 2 : 1;
+            uint32_t id = (wrong_id << 5) | 0x08;
+            int old_mode = controller_eyou.controller_mode;
+            printf("  [RX] MIT frame with wrong node_id=%d (my=%d)\r\n", wrong_id, my_id);
+            fdcan_rx_user(id, d, 8);
+            printf("  mode=%d (expect unchanged=%d)\r\n", controller_eyou.controller_mode, old_mode);
+            printf("  %s\r\n", (controller_eyou.controller_mode == old_mode) ? "PASS" : "FAIL");
+            break;
+        }
+#endif /* CAN_PROTO_CYBEAST */
         default:
             printf("  Unknown cantest%d (valid: 1-19)\r\n", tc);
             break;

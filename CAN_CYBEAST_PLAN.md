@@ -234,11 +234,26 @@ mit_max_torque = 50.0f    // Nm
 - [x] `CAN_PROTO_WLY` 编译 0 Error 0 Warning
 - [x] `CAN_PROTO_CYBEAST` 编译 0 Error 0 Warning
 
-### V2: 串口冒烟 (无需 CAN 适配器)
-- [ ] 切 CYBEAST 编译 → 烧录 → 串口开机 log 正常
-- [ ] 打印 "CyberBeast CAN Simple init, node_id=1"
-- [ ] 串口命令 `logid50` / `logfreq100` 正常工作
-- [ ] 电机闭环运行正常
+### V2: cantest 自动化验证 (串口命令, 无需 CAN 适配器)
+
+已实现 `cantest20~27`，串口发送命令即可执行 (stub 模式, 不上 CAN 总线):
+
+| 命令 | 验证内容 | 预期结果 |
+|------|---------|---------|
+| `cantest20` | MIT 解包中点 (50%量程) | p=0, v=0, kp=250, kd=2.5, tq=0 |
+| `cantest21` | MIT 解包全零 (最小值) | p=-12.5, v=-65, kp=0, kd=0, tq=-50Nm |
+| `cantest22` | MIT 解包全FF (最大值) | p=+12.5, v=+65, kp=500, kd=5, tq=+50Nm |
+| `cantest23` | Heartbeat 字段 | state=8, err=0, life 递增 |
+| `cantest24` | 单位换算 rev→内部 | pos=368640, vel=1536000 |
+| `cantest25` | 状态机 IDLE↔CLOSED | foc_run=2/0 切换正确 |
+| `cantest26` | MIT 超时保护 (25ms) | 退出 MIT→零电流→CommunicateErr |
+| `cantest27` | 非本节点忽略 | mode 不变 (PASS) |
+
+使用方法:
+```
+串口 921600 → 发送 "cantest20" ~ "cantest27"
+每个 case 自动打印 [RX] 模拟帧 + 内部状态 + 预期值对比
+```
 
 ### V3: CAN 心跳验证
 - [ ] USB-CAN 适配器 (Classic CAN 1Mbps) 连接
