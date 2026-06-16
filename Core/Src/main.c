@@ -37,6 +37,10 @@
 #include "ifly_test.h"
 #include "ifly_fault.h"
 #include "can_wly.h"
+#include "can_protocol_sel.h"
+#if (CAN_PROTOCOL_SEL == CAN_PROTO_CYBEAST)
+#include "can_cybeast.h"
+#endif
 #include "can_debug.h"
 #include "flash_port.h"
 #include "ota_app.h"
@@ -227,7 +231,11 @@ int main(void)
 	ota_init();
 
 	/* 万里扬FDCAN协议从站初始化 (fdcan_rx_user 已在 can_wly.c 中覆盖弱符号) */
+#if (CAN_PROTOCOL_SEL == CAN_PROTO_CYBEAST)
+	can_cybeast_init();
+#else
 	can_wly_init();
+#endif
 	can_debug_init();
   /* USER CODE END 2 */
 
@@ -276,7 +284,11 @@ int main(void)
 		}
 
 		/* CAN RX 调试帧异步打印 (canrxdbg 命令开启) */
+#if (CAN_PROTOCOL_SEL == CAN_PROTO_CYBEAST)
+		can_cybeast_poll();
+#else
 		can_wly_dbg_poll();
+#endif
 		can_debug_poll();
 
 		/* 非阻塞周期调用日志打印 */
@@ -332,7 +344,11 @@ int main(void)
 		static uint32_t can_tick = 0;
 		if (HAL_GetTick() - can_tick >= 1) {
 			can_tick = HAL_GetTick();
+#if (CAN_PROTOCOL_SEL == CAN_PROTO_CYBEAST)
+			can_cybeast_tick_1ms();
+#else
 			can_wly_tick_1ms();
+#endif
 		}
 
 		/* 历史调试打印块已迁到 foc_bsp.c dbg_log_print()，详见 logid 120/130/140/150/151 */

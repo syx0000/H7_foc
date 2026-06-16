@@ -3,6 +3,7 @@
  * @brief   CAN-FD debug channel (0x7E0~0x7EF), 32B payload limit
  */
 #include "can_debug.h"
+#include "can_protocol_sel.h"
 #include "fdcan.h"
 #include "flash_port.h"
 #include "foc_controller.h"
@@ -631,6 +632,9 @@ void can_debug_poll(void) {
 /* ===== 0x7E2 periodic log (all <= 32B) ===== */
 static uint8_t s_seq=0;
 void can_debug_send_log(void) {
+#if (CAN_PROTOCOL_SEL == CAN_PROTO_CYBEAST)
+    return;  /* 守护兽模式: CAN log 禁止 (帧超 8B), 只走串口 */
+#else
     uint8_t buf[32];
     uint16_t id=dbgLogFlag;
     uint16_t ts=(uint16_t)(HAL_GetTick()&0xFFFF);
@@ -700,6 +704,7 @@ void can_debug_send_log(void) {
         break;
     default: break;
     }
+#endif /* CAN_PROTO_CYBEAST guard */
 }
 
 /* ===== 0x7E3 async event ===== */

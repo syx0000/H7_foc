@@ -23,6 +23,7 @@
 /* USER CODE BEGIN 0 */
 #include <string.h>
 #include <stdio.h>
+#include "can_protocol_sel.h"
 /* USER CODE END 0 */
 
 FDCAN_HandleTypeDef hfdcan1;
@@ -39,7 +40,11 @@ void MX_FDCAN1_Init(void)
 
   /* USER CODE END FDCAN1_Init 1 */
   hfdcan1.Instance = FDCAN1;
+#if (CAN_PROTOCOL_SEL == CAN_PROTO_CYBEAST)
+  hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
+#else
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
+#endif
   hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
   hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
@@ -160,6 +165,32 @@ HAL_StatusTypeDef fdcan_send(uint32_t std_id, const uint8_t *data, uint32_t len)
         printf("\r\n");
         return HAL_OK;
     }
+
+#if (CAN_PROTOCOL_SEL == CAN_PROTO_CYBEAST)
+    /* 守护兽模式: Classic CAN, 最大 8 字节 */
+    if (len > 8) return HAL_ERROR;
+    static const uint32_t dlc_table[] = {
+        FDCAN_DLC_BYTES_0, FDCAN_DLC_BYTES_1, FDCAN_DLC_BYTES_2, FDCAN_DLC_BYTES_3,
+        FDCAN_DLC_BYTES_4, FDCAN_DLC_BYTES_5, FDCAN_DLC_BYTES_6, FDCAN_DLC_BYTES_7,
+        FDCAN_DLC_BYTES_8,
+    };
+    FDCAN_TxHeaderTypeDef tx = {0};
+    tx.Identifier          = std_id & 0x7FF;
+    tx.IdType              = FDCAN_STANDARD_ID;
+    tx.TxFrameType         = FDCAN_DATA_FRAME;
+    tx.DataLength          = dlc_table[len];
+    tx.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+    tx.BitRateSwitch       = FDCAN_BRS_OFF;
+    tx.FDFormat            = FDCAN_CLASSIC_CAN;
+    tx.TxEventFifoControl  = FDCAN_NO_TX_EVENTS;
+    tx.MessageMarker       = 0;
+
+    uint8_t buf[8] = {0};
+    if (data && len) memcpy(buf, data, len);
+    return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx, buf);
+
+#else
+    /* WLY 模式: CAN-FD + BRS, 最大 64 字节 */
     static const uint32_t dlc_table[] = {
         FDCAN_DLC_BYTES_0,  FDCAN_DLC_BYTES_1,  FDCAN_DLC_BYTES_2,  FDCAN_DLC_BYTES_3,
         FDCAN_DLC_BYTES_4,  FDCAN_DLC_BYTES_5,  FDCAN_DLC_BYTES_6,  FDCAN_DLC_BYTES_7,
@@ -173,7 +204,6 @@ HAL_StatusTypeDef fdcan_send(uint32_t std_id, const uint8_t *data, uint32_t len)
     for (idx = 0; idx < sizeof(pad_size); idx++) {
         if (pad_size[idx] >= len) break;
     }
-    uint32_t pad_len = pad_size[idx];
 
     FDCAN_TxHeaderTypeDef tx = {0};
     tx.Identifier          = std_id & 0x7FF;
@@ -181,9 +211,6 @@ HAL_StatusTypeDef fdcan_send(uint32_t std_id, const uint8_t *data, uint32_t len)
     tx.TxFrameType         = FDCAN_DATA_FRAME;
     tx.DataLength          = dlc_table[idx];
     tx.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-    /* 全部帧统一走 CAN-FD + BRS, 8B 帧也用 FD 数据相位 (8Mbit/s) 压短帧时长,
-     * 让 0x7FD 10kHz 逐拍上报 (~30µs/帧) 不会撞 TX FIFO. 总线上不能有
-     * 仅经典 CAN 的节点, 否则会全部失联 */
     tx.BitRateSwitch       = FDCAN_BRS_ON;
     tx.FDFormat            = FDCAN_FD_CAN;
     tx.TxEventFifoControl  = FDCAN_NO_TX_EVENTS;
@@ -193,6 +220,7 @@ HAL_StatusTypeDef fdcan_send(uint32_t std_id, const uint8_t *data, uint32_t len)
     if (data && len) memcpy(buf, data, len);
 
     return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx, buf);
+#endif
 }
 
 __weak void fdcan_rx_user(uint32_t id, const uint8_t *data, uint32_t len)

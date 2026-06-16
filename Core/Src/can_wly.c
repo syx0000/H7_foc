@@ -2,6 +2,7 @@
  * @file    can_wly.c
  * @brief   万里扬FDCAN通信协议V1.7 - 从站实现
  */
+#include "can_protocol_sel.h"
 #include "can_wly.h"
 #include "can_debug.h"
 #include "fdcan.h"
@@ -776,6 +777,11 @@ void fdcan_rx_user(uint32_t id, const uint8_t *data, uint32_t len) {
         return;
     }
 
+#if (CAN_PROTOCOL_SEL == CAN_PROTO_CYBEAST)
+    /* 守护兽模式: 走 can_cybeast 分发 */
+    extern void can_cybeast_rx_dispatch(uint32_t id, const uint8_t *data, uint32_t len);
+    can_cybeast_rx_dispatch(id, data, len);
+#else
     s_can_timeout_cnt = CAN_TIMEOUT_MS;
     if (!s_can_timeout_enabled) s_can_timeout_enabled = 1;
     /* 广播查询: 所有从站回 0x100+ID */
@@ -808,6 +814,7 @@ void fdcan_rx_user(uint32_t id, const uint8_t *data, uint32_t len) {
     default:
         break;
     }
+#endif
 }
 
 void can_wly_init(void) {
