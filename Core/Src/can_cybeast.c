@@ -17,6 +17,8 @@
 #include "foc_api.h"
 #include "can_wly.h"    /* can_wly_Nm_to_iA / can_wly_iA_to_Nm / Kt LUT */
 #include "ifly_fault.h" /* getBoardTemp / getMotorTemp */
+#include "tim.h"        /* htim1 */
+#include "adc.h"        /* g_vdc */
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -34,7 +36,7 @@ static uint16_t s_hb_tick = 0;
 /* 外部引用 */
 extern volatile uint8_t g_can_cali_request;
 extern uint8_t g_can_timeout_force_disable;
-extern float g_vdc;
+/* g_vdc 已通过 adc.h 引入 */
 extern uint8_t NPP;
 extern uint32_t DEFAULT_MAX_SPEED;
 
@@ -713,9 +715,9 @@ static void handle_set_pos_gain(const uint8_t *d, uint32_t len)
     if (len < 4) return;
     float pos_gain;
     memcpy(&pos_gain, d, 4);
-    /* 守护兽单位: (rev/s)/rev, 内部: IncPID_Position_KP (Q0 整数)
+    /* 守护兽单位: (rev/s)/rev, 内部: IncPID_Position.P (Q0 整数)
      * 简化映射: 直接写入 (后续可加精确换算) */
-    controller_eyou.IncPID_Position.Kp = (int32_t)(pos_gain * 100.0f);
+    controller_eyou.IncPID_Position.P = (int32_t)(pos_gain * 100.0f);
 }
 
 /*============================================================================
@@ -729,8 +731,8 @@ static void handle_set_vel_gains(const uint8_t *d, uint32_t len)
     memcpy(&vel_gain, &d[0], 4);
     memcpy(&vel_integrator, &d[4], 4);
 
-    controller_eyou.IncPID_Speed.Kp = (int32_t)(vel_gain * 100.0f);
-    controller_eyou.IncPID_Speed.Ki = (int32_t)(vel_integrator * 100.0f);
+    controller_eyou.IncPID_Speed.P = (int32_t)(vel_gain * 100.0f);
+    controller_eyou.IncPID_Speed.I = (int32_t)(vel_integrator * 100.0f);
 }
 
 /*============================================================================
@@ -746,14 +748,35 @@ static void handle_set_limits(const uint8_t *d, uint32_t len)
 
     /* vel_limit: rev/s 输出端 → rpm×1024×25 电机端 */
     if (vel_limit_revs > 0.0f) {
-        DEFAULT_MAX_SPEED = (uint32_t)(vel_limit_revs * 60.0f * 1024.0f * 25.0f);
+        int32_t new_max = (int32_t)(vel_limit_revs * 60.0f * 1024.0f * 25.0f);
+        DEFAULT_MAX_SPEED = (uint32_t)new_max;
+        /* 速度环指令限幅 (set_velocity_ref_loop 用此值钳位 velocity_ref) */
+        controller_eyou.FlashData.MaxSpeed = DEFAULT_MAX_SPEED;
+        /* 位置环总输出限幅 = MaxSpeed (PID+FF 合计), 防止速度环看到大幅截断的方波 */
+        controller_eyou.FlashData.Pid_PositionLimit = new_max;
+        /* 位置环 PID OutputMax 略大于 MaxSpeed (给 FF 留 20% 余量), 保持 PID 线性工作 */
+        controller_eyou.IncPID_Position.OutputMax = new_max + new_max / 5;
+        /* 速度环斜坡: 更新加速度 + 钳位内部状态 */
+        controller_eyou.SpeedSmooth.MaxVelAccEveryPrd = DEFAULT_MAX_SPEED / MIN_ACC_TIME;
+        if (controller_eyou.SpeedSmooth.NowVelocityRef >  new_max)
+            controller_eyou.SpeedSmooth.NowVelocityRef =  new_max;
+        if (controller_eyou.SpeedSmooth.NowVelocityRef < -new_max)
+            controller_eyou.SpeedSmooth.NowVelocityRef = -new_max;
+        controller_eyou.SpeedSmooth.OldVelocityRef = controller_eyou.SpeedSmooth.NowVelocityRef;
+        /* 梯形规划: 更新巡航速度 + 钳位当前规划速度 (留 10% 给速度环跟踪) */
+        float v_max_new = vel_limit_revs * 60.0f * 2.4576f * 0.9f; /* POS_TRAPEZOID_VMAX_SCALE */
+        controller_eyou.SmoothPosRef.v_max = v_max_new;
+        if (controller_eyou.SmoothPosRef.cur_v >  v_max_new)
+            controller_eyou.SmoothPosRef.cur_v =  v_max_new;
+        if (controller_eyou.SmoothPosRef.cur_v < -v_max_new)
+            controller_eyou.SmoothPosRef.cur_v = -v_max_new;
     }
 
     /* current_limit: A → Q10 */
     if (current_limit_A > 0.0f) {
         int32_t lim_q10 = (int32_t)(current_limit_A * 1024.0f);
         controller_eyou.IncPID_Speed.OutputMax = lim_q10;
-        controller_eyou.IncPID_Speed.OutputMin = -lim_q10;
+        /* IncPID 结构体无 OutputMin，对称限幅由 PidRun 内部处理 */
     }
 }
 

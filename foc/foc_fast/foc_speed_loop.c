@@ -63,6 +63,27 @@ void foc_velocity_close_loop(ControllerStruct* controller) {
   controller->velocity_ref_filterd = controller->velocity_ref;
 #endif
 
+  /* 斜坡输出用 MaxSpeed 限幅 + 位置环 anti-windup 联动 */
+  {
+    int32_t max_spd = (int32_t)controller->FlashData.MaxSpeed;
+    uint8_t clamped = 0;
+    if (controller->velocity_ref_filterd >  max_spd) {
+        controller->velocity_ref_filterd =  max_spd;
+        controller->SpeedSmooth.NowVelocityRef =  max_spd;
+        controller->SpeedSmooth.OldVelocityRef =  max_spd;
+        clamped = 1;
+    }
+    if (controller->velocity_ref_filterd < -max_spd) {
+        controller->velocity_ref_filterd = -max_spd;
+        controller->SpeedSmooth.NowVelocityRef = -max_spd;
+        controller->SpeedSmooth.OldVelocityRef = -max_spd;
+        clamped = 1;
+    }
+    /* 只在斜坡输出实际被 MaxSpeed 截断时才通知位置环 anti-windup,
+     * 避免梯形规划正常裕量(v_max=90%·MaxSpeed)触发误禁积分 */
+    controller->IncPID_Position.saturated = clamped;
+  }
+
   // 速度环带宽测试信号注入（斜坡滤波之后、PID 之前）
   int32_t spd_sweep = spd_bw_test_run(&controller->spd_bw_test, controller->dtheta_mech);
   controller->velocity_ref_filterd += spd_sweep;

@@ -70,6 +70,7 @@ extern volatile uint8_t g_foc_openloop_enable;
 
 /* 规则通道实时数据（VDC/温度，TIM6触发，1kHz采样） */
 extern volatile uint32_t g_vdc_raw;         /* VDC平均值（2次采样） */
+extern float g_vdc;                         /* VDC转换后电压值（V） */
 extern volatile uint32_t g_temp_motor_raw;  /* 电机温度原始值 */
 extern volatile uint32_t g_temp_mos_raw;    /* MOS温度原始值 */
 extern volatile uint32_t g_reg_callback_count;  /* 规则通道回调计数 */

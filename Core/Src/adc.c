@@ -39,6 +39,7 @@ static uint32_t adc_reg_buffer[2];  /* [0]=VDC+TEMP_MOTOR, [1]=VDC+TEMP_MOS */
 
 /* 规则通道实时数据 */
 volatile uint32_t g_vdc_raw = 0;         /* VDC平均值（2次采样） */
+float g_vdc = 0.0f;                      /* VDC转换后电压值（V） */
 volatile uint32_t g_temp_motor_raw = 0;  /* 电机温度原始值 */
 volatile uint32_t g_temp_mos_raw = 0;    /* MOS温度原始值 */
 volatile uint32_t g_reg_callback_count = 0;  /* 规则通道回调计数（调试用） */
@@ -492,6 +493,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
         g_vdc_raw        = (vdc1 + vdc2) / 2;
         g_temp_motor_raw = temp_motor;
         g_temp_mos_raw   = temp_mos;
+
+        /* 更新 g_vdc (V): 16bit ADC, 3.3V满量程, 分压比21:1 */
+        g_vdc = (float)g_vdc_raw * 3.3f / 65535.0f * 21.0f;
 
         /* 更新 SVPWM 用的实时母线电压 (V), 分压比 21:1, 3.3V/65535 */
         extern volatile uint16_t g_udc_volt;
